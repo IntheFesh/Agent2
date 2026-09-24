@@ -13,6 +13,8 @@ DeepSeek 官方价格页 `https://api-docs.deepseek.com/zh-cn/quick_start/pricin
 > 百万tokens输出 空闲时段 4元 … 高峰时段 8元 …
 > (2) 空闲时段价格为高峰时段价格的一半。北京时间周一至周五（不含中国法定节假日）9:00 - 12:00、14:00 - 18:00 为高峰时段
 
+2026-09-24 20:43 UTC 为 Phase 13 重新读取同一页面（中英文版），`deepseek-flash` 的各项单价没有变化。`configs/pricing.yaml` 据此填入 `deepseek-flash` 的高峰价（输入按缓存未命中 ¥2、输出 ¥8 / 百万 tokens），合成账本（`workbench synth` 的 `ledger_summary.json`）用它计算上界口径的费用。
+
 ## 2. 记账口径
 
 - **一律按高峰价、且把全部输入 token 按"缓存未命中"计**：输入 ¥2 / 百万 tokens，输出 ¥8 / 百万 tokens。这是上界：本轮调用实际都发生在空闲时段（UTC 17 点前后，即北京时间次日凌晨），而且有缓存命中，实际扣费更低。
