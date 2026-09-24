@@ -82,7 +82,8 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
     - 所有场景只按字面名读取 `PORT`、`HOST`、`DATABASE_PATH`，没有整体访问 `os.environ`；
     - `e_commerce_33` 没有 import 任何网络库。
 
-    正则扫描排除不了动态访问。是否轮换这把 key 由仓库主人决定。
+    正则扫描排除不了动态访问。仓库主人决定暂不轮换，自己检查 DeepSeek 后台的用量记录，Phase 13 结束后删除这把 key（`user-decisions.md` D12）。
+  - **后续安排**：仓库主人决定（`user-decisions.md` D13），`awm verify` 经本地代理只拿占位 key、`workbench train launch` 改用白名单这两项不在当前阶段做。如果执行 Phase 15，这两项作为它的前置修复先完成；否则保留在这里。
 - **每次工具调用新建一个 MCP session**：与 AWM 的做法一致，未做连接池（`docs/IDEAS.md`）。
 - **单进程部署**：审批令牌的"已使用"集合、限流桶、忙碌集合都在进程内存中；多副本部署需要共享存储。
 - **长期记忆的 TTL 精度为秒级**（LangGraph `SqliteStore` 的实现）。
