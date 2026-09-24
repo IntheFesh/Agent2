@@ -380,3 +380,16 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - 服务端抛异常时返回 `Error calling get_product_by_id. Status code: 500. Response: Internal Server Error`；
   - 查询无结果时返回 `isError=False`，文本为 `'[]'`。
 - §9 第 5 条的孤儿进程风险已实测证实：只终止 `python -m awm.core.server` 这个 launcher，`sh -c … | tee` 以及真正的服务进程都会继续存活。按进程组 `killpg` 之后，三者都能被杀死。本沙箱的 PID 1（`/process_api`）不回收僵尸进程，因此被杀的进程会以 `Z` 状态残留，测试只断言没有存活的非僵尸进程（`workbench/envs/procs.py`）。
+
+### Phase 3
+
+- MCP SDK 1.26.0 服务端：
+  - lowlevel `Server.call_tool(*, validate_input=True)`（`mcp/server/lowlevel/server.py:492`）；
+  - 处理器可以直接返回 `CallToolResult`（`:539-540`）；
+  - 请求上下文里的 `request` 就是 HTTP 请求对象（`:758`）；
+  - `StreamableHTTPSessionManager(app, event_store, json_response=False, stateless=False, ...)`（`mcp/server/streamable_http_manager.py:60-65`）。
+- Starlette 的 `Mount("/mcp")` 访问 `/mcp` 时会 307 重定向，MCP 客户端不跟随，所以网关用 `Route` 挂一个 ASGI 类实例。
+- 网关集成测试链路：迷你场景（AWM 启动器）→ 网关 MCP 前端 → MCP 客户端。实测结果：
+  - 带 `X-Workbench-Session` 的 `list_tools` 返回带前缀的工具名；
+  - destructive 工具在没有令牌时被拒绝，并写入审计；
+  - 带令牌调用成功，DB diff 中 `payment_methods` 被删除的主键为 2。
