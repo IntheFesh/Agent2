@@ -1,0 +1,61 @@
+# Phase 11 — official dataset (2026-09-24 UTC, Claude Code cloud container, Linux x86_64, no GPU)
+
+$ env -u HF_TOKEN make data
+dataset ready in data/awm1k (revision dde80a0283fe781bdc51656bce57063dc5650213)
+$ cat data/awm1k/MANIFEST.json
+{"origin": "official", "source": "huggingface.co/datasets/Snowflake/AgentWorldModel-1K", "revision": "dde80a0283fe781bdc51656bce57063dc5650213", "license": "CC-BY-4.0", "downloaded_at": "2026-09-24T13:56:01Z", "modify": "never (rule R2)"}
+
+$ sha256sum data/awm1k/gen_*.jsonl   (first 12 hex; equal to the LFS oids listed by the HF tree API)
+ae8acb3c2376 gen_db.jsonl
+2c7749c17103 gen_envs.jsonl
+39c40969ad76 gen_sample.jsonl
+6362e31af6e3 gen_scenario.jsonl
+d7b2ce7b1da6 gen_spec.jsonl
+0537871c8824 gen_tasks.jsonl
+269a97a085dc gen_verifier.jsonl
+2de0b668bd0c gen_verifier.pure_code.jsonl
+
+$ wc -l data/awm1k/gen_*.jsonl
+     1000 data/awm1k/gen_db.jsonl
+     1000 data/awm1k/gen_envs.jsonl
+     1000 data/awm1k/gen_sample.jsonl
+     1000 data/awm1k/gen_scenario.jsonl
+     1000 data/awm1k/gen_spec.jsonl
+     1000 data/awm1k/gen_tasks.jsonl
+    10476 data/awm1k/gen_verifier.jsonl
+    10010 data/awm1k/gen_verifier.pure_code.jsonl
+    26486 total
+
+$ uv run workbench doctor | grep dataset
+│ dataset                     │ ok     │ data/awm1k present                    │
+
+$ uv run workbench env search e_commerce_33
+┃ scenario      ┃ tools ┃ tasks ┃ tables ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━┩
+│ e_commerce_33 │ 39    │ 10    │ 19     │
+└───────────────┴───────┴───────┴────────┘
+
+$ workbench env serve &  ;  time workbench env up e_commerce_33 --session-id p11
+"session_id": "p11", "scenario": "e_commerce_33", "url": "http://127.0.0.1:18100/mcp", "state": "healthy", "port": 18100, tools: 39
+real	0m10.778s
+$ workbench env ls
+│ p11     │ e_commerce_33 │ healthy │ http://127.0.0.1:18100/… │ 39    │       │
+
+# MCP probes on the official e_commerce_33 session (isolated copy of its DB):
+search_products {"query": "no-such-product-zzz"}      isError=False  {"products": [], "total": 0}
+get_product_by_id {"product_id": 999999}            isError=False  {"product": {"id": 0, "title": "", ...}, "aggregates": null, "active_offers": []}
+get_product_by_id {"product_id": "abc"}             isError=True   Input validation error: 'abc' is not of type 'integer'
+add_item_to_cart {"quantity": 1}                    isError=True   Input validation error: 'product_offer_id' is a required property
+remove_cart_item {"cart_item_id": 999999}           isError=False  {"success": false}
+delete_user_payment_method {"payment_method_id": 999999} isError=False {"success": false}
+add_item_to_cart {"product_offer_id": 999999, "quantity": 1} isError=False {"cart_item": {"id": 4, "cart_id": 1, "product_offer_id": 999999, ...}}  (upstream code inserts dangling offer ids)
+$ workbench env down p11
+stopped p11
+
+$ uv run pytest -q -m official_data
+4 passed, 183 deselected in 24.55s
+$ (data/awm1k moved away) make test
+183 passed, 4 skipped, 50 warnings in 41.01s
+SKIPPED [4] tests/integration/test_official_data.py: official dataset not found in data/awm1k (run `make data`)
+$ make test   (with data/awm1k present)
+187 passed, 80 warnings in 60.51s (0:01:00)
