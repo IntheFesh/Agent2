@@ -12,7 +12,7 @@
 | U5 | smoke 训练运行 | `configs/train/smoke.yaml`、`workbench train launch --execute`（产物标 `NO_RESULTS`） | 无 GPU | 单卡 CUDA GPU（preflight 默认要求至少 12000 MiB 可用显存）+ U3 + U4 |
 | U6 | Docker 镜像构建与 compose 启动 | `Dockerfile`、`docker-compose.yml`（`docker compose config` 已通过） | 沙箱中没有 Docker daemon | 有 Docker 的机器上执行 `docker compose up --build` |
 | U8 | `awm agent` / `awm verify` 各跑一次单任务 | 已于 2026-09-24 用 DeepSeek（`deepseek-flash`）各执行 1 次：`awm verify --mode sql` 链路打通；`awm agent` 的 LLM 调用、文本解析与 MCP 工具清单打通（`docs/verification/2026-09-24-llm-chain.md` §4–5） | **部分验证**：`awm agent` 第 2 轮 DeepSeek 在纯文本中输出了它自己的 DSML 工具调用标记，AWM 只识别 `<tool_call>`（`awm/core/agent.py:130-167`），循环提前结束，没有执行任何写操作；按 D3 不改上游、不写适配器 | 一个原生遵循 `<tool_call>` 文本协议的模型端点（例如经 vLLM 服务的 Arctic-AWM，见 U1），用 `--mcp_url` 模式再执行一次（`--scenario` 自动起服有上游缺陷，见 §6） |
-| U9 | 合成流水线真实执行 | `workbench synth run --execute`，含 checkpoint、缓存、账本 | 需要 LLM 与 embedding API key；未在本仓库执行过，账本中的价格是占位值 | API key（见 `.env.example`）；小规模试跑 `--scenarios 1` |
+| U9 | 合成流水线的 `gen scenario` 步骤 | `workbench synth run` 的完整模式（不加 `--scenario-file`，从 `gen scenario` 开始） | 本轮没有 embedding 端点：DeepSeek 不提供 embedding 接口（ADR-021）。其余 6 个步骤、断点续跑、缓存、账本与 `check_all` 已于 2026-09-24 真实执行（见下方已验证项） | 一个 OpenAI 兼容的 embedding 端点（AWM 默认用 `text-embedding-3-large`，`awm/core/scenario.py:40-43`）与 `EMBEDDING_OPENAI_API_KEY`；用 `--scenarios 1` 试跑完整模式 |
 
 CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run 9，提交 `bbb541c`），因此不列为未验证项。此前 run 4–8 失败，原因分别是 detect-secrets 误报和 loguru 在 CI 中强制彩色输出，均已修复。
 
@@ -21,6 +21,14 @@ CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run
 - **官方数据集下载与接入（原 U7）**：`make data` 匿名下载 revision `dde80a0`，8 个文件齐全，条目数与数据集卡一致；`workbench doctor` 的 dataset 一项为 ok；官方 `e_commerce_33` 经 env-manager 真实启动，`list_tools` 返回 39 个工具。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-dataset.md`，日志 `docs/verification/logs/2026-09-24-phase11.log`。
 - **真实 LLM 驱动的智能体（原 U2）**：`openai_compat` 后端接 DeepSeek（`deepseek-flash`，key 只从环境变量读取），`workbench doctor` 的 llm 一项为 ok；在官方 `e_commerce_33` 任务 0 上执行 1 次 `workbench agent run`，走完"规划 → 读工具 → 审批 → 写工具 → 回答"，DB diff 为 `cart_items` 新增 1 行。单次链路演示，不构成评测。Phase 12.5 的修复完成后，在同一任务上用默认预算再执行了 1 次（提交 `f135189`，WALKTHROUGH §5.3），链路仍然打通。vLLM 后端仍未验证（U1）。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-llm-chain.md`，日志 `docs/verification/logs/2026-09-24-phase12-*.log`。
 - **`awm verify --mode sql` 单次执行（U8 的一半）**：执行官方 verifier 并由 DeepSeek 裁判，写出 `verify.sql.json`；UI 轨迹查看器能渲染这次 `awm agent` 的真实 `trajectory.json`。证据同上。
+- **合成流水线真实执行（原 U9 除 `gen scenario` 外的部分）**：2026-09-24 用 DeepSeek（`deepseek-flash`）经本地代理执行 1 次 `workbench synth run --scenario-file … --execute`，场景为手写的 `local_it_service_desk`（D5）。结果：
+  - 从 `gen task` 到 `gen verifier` 的 6 个步骤都一次成功；
+  - 故意中断后用同一命令续跑，6 个步骤按 checkpoint 跳过，只重做被中断的验证；
+  - 缓存命中另用一次不带 key 的重放验证；
+  - 账本逐条记账，上界口径 ¥1.2240；
+  - `check_all` 报告 1 个环境启动成功、15 个工具。
+
+  机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-synth.md`，日志 `docs/verification/logs/2026-09-24-phase13-synth.log`。
 
 ## 2. 数字与许可证
 
@@ -47,7 +55,7 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 
 ## 5. 合成环境未用于训练
 
-`data/synth/` 下的任何产物（manifest 标 `origin: local-synth`）都没有被用于任何训练，也没有与官方数据混合（ADR-011）。实际上本仓库从未真实执行过合成（U9）。
+`data/synth/` 下的任何产物（manifest 标 `origin: local-synth`）都没有被用于任何训练，也没有与官方数据混合（ADR-011）。唯一一次真实合成（Phase 13，`data/synth/p13_it_service_desk/`，1 个手写场景）同样如此：它的场景名以 `local_` 开头、不与任何官方场景重名（ADR-021），产物不入库。
 
 ## 6. 其它已知限制
 
@@ -84,6 +92,9 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 
     正则扫描排除不了动态访问。仓库主人决定暂不轮换，自己检查 DeepSeek 后台的用量记录，Phase 13 结束后删除这把 key（`user-decisions.md` D12）。
   - **后续安排**：仓库主人决定（`user-decisions.md` D13），`awm verify` 经本地代理只拿占位 key、`workbench train launch` 改用白名单这两项不在当前阶段做。如果执行 Phase 15，这两项作为它的前置修复先完成；否则保留在这里。
+- **合成步骤没有输出上限，代理也没有预算熔断**：AWM 把 `max_tokens` 改名为 `max_completion_tokens` 发出（`awm/gpt.py:160-164`），DeepSeek 忽略这个参数（探针 P4），所以单个请求的输出只受服务端默认上限约束（思考模式 64K token）。本仓库的合成代理只缓存、重试、记账，不做预算熔断（IDEAS 5）。Phase 13 靠运行期间按账本监视、设 ¥6 止损（操作者脚本，不在仓库中）；在途请求要等响应返回才进账本。
+- **中断合成运行后需要手动清理**：`gen env` 与 `awm env check_all` 用 `start_new_session=True` 启动测试 server（`awm/core/env.py:161-172`），它们不在 `workbench synth run` 的进程组里，中断时不会一起结束，AWM 的临时目录 `/tmp/env_test_*` 也会留下。Phase 13 的中断留下了 1 个 server 和 1 个临时目录，已手动清理。
+- **合成 manifest 每次执行都会重写**：续跑后 `created_at` 是最后一次执行的时间，不是首次创建的时间。
 - **每次工具调用新建一个 MCP session**：与 AWM 的做法一致，未做连接池（`docs/IDEAS.md`）。
 - **单进程部署**：审批令牌的"已使用"集合、限流桶、忙碌集合都在进程内存中；多副本部署需要共享存储。
 - **长期记忆的 TTL 精度为秒级**（LangGraph `SqliteStore` 的实现）。

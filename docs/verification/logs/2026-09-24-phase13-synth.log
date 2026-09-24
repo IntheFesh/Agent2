@@ -1,0 +1,269 @@
+# 2026-09-24 Phase 13: one real `workbench synth run --execute` (TASK_v2 Phase 13; owner decisions D5, D12).
+# machine: Claude Code cloud container (Linux x86_64, no GPU). LLM: DeepSeek deepseek-flash via workbench's local
+# synthesis proxy. The real key is mapped in the process environment only (D2) and stays in the proxy; the gen steps
+# get the placeholder `workbench-proxy` (ADR-019). Engineering facts only; nothing here is an evaluation.
+
+## scenario (hand-written, D5; not official data): data/synth/p13_it_service_desk/local_scenario.jsonl
+{"name": "local_it_service_desk", "description": "Helpdesk Hub is the internal IT service desk of a mid-sized company, used by employees and by the IT support team. Employees submit support tickets for hardware failures, software installation, access requests and network problems, choosing a category and a priority and describing the issue. Support agents triage incoming tickets, assign them to themselves or to a specialist group, add internal notes and public comments, move tickets through the statuses open, in progress, waiting for user, resolved and closed, and escalate tickets that miss their service-level target. The desk keeps an asset inventory that links laptops, monitors, phones and software licenses to employees, so agents can see which devices a requester owns and record repairs or replacements. Employees can browse a knowledge base of troubleshooting articles, mark whether an article helped, and follow the history of their own tickets. Team leads review open workload per agent, overdue tickets and the satisfaction ratings that employees give after a ticket is resolved."}
+
+## configuration (process environment only)
+PYTHONPYCACHEPREFIX=$PWD/.cache/pycache
+OPENAI_API_KEY="$DEEPSEEK_API_KEY"          # upstream key of the proxy (settings.synth.upstream_api_key_env)
+OPENAI_BASE_URL=https://api.deepseek.com      # upstream base URL of the proxy
+AWM_SYN_OVERRIDE_MODEL=deepseek-flash
+
+## command (attempt 1 and the resume are the same command)
+$ uv run workbench synth run --scenarios 1 --out data/synth/p13_it_service_desk \
+    --scenario-file data/synth/p13_it_service_desk/local_scenario.jsonl --execute
+
+## attempt 1: timeline
+# A watcher polled the run's ledger: stop at CNY 6 of ledger cost; interrupt once after the first gen env response.
+2026-09-24T20:58:04Z watching process group 2548, mode=interrupt-env, ceiling CNY 6.0
+2026-09-24T20:58:04Z ledger: 0 entries, cost so far (upper bound) CNY 0.0000
+2026-09-24T21:02:55Z INTERRUPT: first gen env response recorded; interrupting the run on purpose
+2026-09-24T21:02:55Z sent SIGINT to process group 2548
+2026-09-24T21:03:10Z sent SIGTERM to process group 2548
+2026-09-24T21:03:11Z process group 2548 alive after stop: False
+2026-09-24T21:03:11Z done: 5 ledger entries, cost (upper bound) CNY 0.7306
+# Neither signal reached the run: the watcher signalled process group 2548, the wrapper shell whose PID `$!`
+# returned, but `setsid` had put the run in its own session and process group 2549 (`ps -o pgid` showed 2549 for
+# uv and workbench). The SIGTERM only ended the wrapper; uv/workbench/awm continued in group 2549.
+# 2026-09-24T21:03:38Z: SIGTERM sent to process group 2549 by hand. By then all six gen steps had finished
+# (gen verifier at 21:03:29); the interruption hit the post-run validation (`awm env check_all` was testing the
+# environment, logs/check_all.log ends at 21:03:35). Attempt 1 printed no result (its stdout: 'start ...' only).
+# step checkpoints written by attempt 1 (state.json):
+#   task      done  returncode 0  12.3 s
+#   db        done  returncode 0  13.5 s
+#   sample    done  returncode 0  67.7 s
+#   spec      done  returncode 0  78.9 s
+#   env       done  returncode 0  121.3 s
+#   verifier  done  returncode 0  31.2 s
+# cleanup after the interruption: `awm env check_all` had started its test server in its own session
+# (awm/core/env.py:161-172, start_new_session=True), so it survived the kill: pid 3633 (awm.core.server on a
+# random port) was terminated by process group, and its temp dir /tmp/env_test_1f8ca2e2ktqfxnqu was removed.
+
+## attempt 2: the same command resumes (verbatim stdout; AWM's own log lines omitted)
+# ledger lines before the resume: 15
+start 2026-09-24T21:04:54Z
+{
+  "steps": {
+    "task": {
+      "status": "done",
+      "returncode": 0,
+      "seconds": 12.3
+    },
+    "db": {
+      "status": "done",
+      "returncode": 0,
+      "seconds": 13.5
+    },
+    "sample": {
+      "status": "done",
+      "returncode": 0,
+      "seconds": 67.7
+    },
+    "spec": {
+      "status": "done",
+      "returncode": 0,
+      "seconds": 78.9
+    },
+    "env": {
+      "status": "done",
+      "returncode": 0,
+      "seconds": 121.3
+    },
+    "verifier": {
+      "status": "done",
+      "returncode": 0,
+      "seconds": 31.2
+    }
+  },
+  "ledger": {
+    "steps": {
+      "task": {
+        "calls": 1,
+        "cached_calls": 0,
+        "prompt_tokens": 716,
+        "completion_tokens": 1782,
+        "cost": 0.015688,
+        "unpriced_models": []
+      },
+      "db": {
+        "calls": 1,
+        "cached_calls": 0,
+        "prompt_tokens": 895,
+        "completion_tokens": 3190,
+        "cost": 0.02731,
+        "unpriced_models": []
+      },
+      "sample": {
+        "calls": 1,
+        "cached_calls": 0,
+        "prompt_tokens": 3092,
+        "completion_tokens": 20430,
+        "cost": 0.169624,
+        "unpriced_models": []
+      },
+      "spec": {
+        "calls": 1,
+        "cached_calls": 0,
+        "prompt_tokens": 2544,
+        "completion_tokens": 25316,
+        "cost": 0.207616,
+        "unpriced_models": []
+      },
+      "env": {
+        "calls": 1,
+        "cached_calls": 0,
+        "prompt_tokens": 15178,
+        "completion_tokens": 35002,
+        "cost": 0.310372,
+        "unpriced_models": []
+      },
+      "verifier": {
+        "calls": 10,
+        "cached_calls": 0,
+        "prompt_tokens": 66098,
+        "completion_tokens": 45147,
+        "cost": 0.493372,
+        "unpriced_models": []
+      }
+    },
+    "total": {
+      "prompt_tokens": 88523,
+      "completion_tokens": 130867,
+      "cost": 1.223982,
+      "currency": "CNY",
+      "complete": true
+    }
+  },
+  "validation": {
+    "environments_total": 1,
+    "environments_started": 1,
+    "environments_failed": 0,
+    "tools_total": 15,
+    "tools_per_env": {
+      "local_it_service_desk": 15
+    },
+    "failure_categories": {},
+    "failed": {}
+  }
+}
+
+real	0m10.034s
+user	0m9.097s
+sys	0m1.002s
+exit=0
+end 2026-09-24T21:05:04Z
+# ledger lines after the resume: 15 (all six steps skipped by their checkpoints; no LLM request was sent)
+
+## ledger (data/synth/p13_it_service_desk/ledger.jsonl, one line per upstream response)
+{"step": "task", "model": "deepseek-flash", "prompt_tokens": 716, "completion_tokens": 1782, "cached": false, "endpoint": "chat/completions"}
+{"step": "db", "model": "deepseek-flash", "prompt_tokens": 895, "completion_tokens": 3190, "cached": false, "endpoint": "chat/completions"}
+{"step": "sample", "model": "deepseek-flash", "prompt_tokens": 3092, "completion_tokens": 20430, "cached": false, "endpoint": "chat/completions"}
+{"step": "spec", "model": "deepseek-flash", "prompt_tokens": 2544, "completion_tokens": 25316, "cached": false, "endpoint": "chat/completions"}
+{"step": "env", "model": "deepseek-flash", "prompt_tokens": 15178, "completion_tokens": 35002, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6607, "completion_tokens": 2717, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6603, "completion_tokens": 2947, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6609, "completion_tokens": 3137, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6611, "completion_tokens": 3086, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6601, "completion_tokens": 3605, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6622, "completion_tokens": 3751, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6615, "completion_tokens": 4718, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6618, "completion_tokens": 5136, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6602, "completion_tokens": 7120, "cached": false, "endpoint": "chat/completions"}
+{"step": "verifier", "model": "deepseek-flash", "prompt_tokens": 6610, "completion_tokens": 8930, "cached": false, "endpoint": "chat/completions"}
+
+## validation report (validation.md, written by the resume)
+# Synthesis validation report
+
+Engineering facts about this run's generated environments (`awm env check_all`).
+
+- environments: 1 total, 1 started, 0 failed
+- tools (operationIds in generated code): 15
+
+| failure category | count |
+|---|---|
+
+## cache check (zero cost by construction)
+# Attempt 1 was interrupted after its last LLM request, so the resume had nothing to replay. To check the cache,
+# the run's gen task request was replayed with AWM's own client through workbench's proxy code, against the run's
+# llm_cache, with NO upstream key (a miss would get HTTP 401 from DeepSeek, which bills nothing). Output went to
+# scratch; the run's files were not touched (its ledger and cache stayed at 15 entries each). Script: appendix.
+$ env -u OPENAI_API_KEY uv run python cache_replay.py <scratch>
+replayed step: gen task (same argv as the run, --output redirected to scratch)
+returncode: 0
+replay ledger: [{"step": "task", "model": "deepseek-flash", "prompt_tokens": 0, "completion_tokens": 0, "cached": true, "endpoint": "chat/completions"}]
+replayed tasks identical to the run's gen_tasks.jsonl: True
+
+## generated artifacts (summary)
+gen_db: tables ['users', 'assets', 'knowledge_articles', 'knowledge_article_feedback', 'tickets', 'ticket_comments']
+gen_envs: 971 lines of generated server code; 15 operation_ids: ['list_users', 'get_user', 'list_assets', 'get_asset', 'list_knowledge_articles', 'get_knowledge_article', 'submit_article_feedback', 'list_article_feedback', 'create_ticket', 'list_tickets', 'list_overdue_tickets', 'get_ticket', 'update_ticket', 'create_ticket_comment', 'list_ticket_comments']
+gen_tasks: 10 tasks; gen_verifier: 10 rows (verifier mode sql)
+step logs: gen env 'batch test done: 1 passed, 0 failed'; gen verifier 'Progress: 10/10 tasks completed, 0 pending'
+
+## manifest.json (the two hash lines carry a `pragma: allowlist secret` comment for the secret scanner: a git SHA and a file sha256)
+{
+  "origin": "local-synth",
+  "official_data": false,
+  "run_id": "p13_it_service_desk",
+  "created_at": "2026-09-24T21:04:55Z",
+  "awm_sha": "85e322f69279e3b3325b7377ec3bab788514e9cb",  # pragma: allowlist secret
+  "model": "deepseek-flash",
+  "scenarios": 1,
+  "num_tasks": 10,
+  "verifier_mode": "sql",
+  "skipped_steps": [
+    "scenario"
+  ],
+  "scenario_file": "data/synth/p13_it_service_desk/local_scenario.jsonl",
+  "scenario_file_sha256": "29ee5becc8d5b1d8990e496ee10196a3073def39afbe1941fedcd11128cdb6b4",  # pragma: allowlist secret
+  "official_name_check": "data/awm1k/gen_scenario.jsonl (1000 names)",
+  "scenario_note": "hand-written local_ scenarios; gen scenario skipped (no embedding API)",
+  "note": "locally synthesized; not part of AgentWorldModel-1K and never used for training here"
+}
+# note: created_at is the time of the last execute (the resume); the manifest is rewritten on every execute.
+
+## balance cross-check (USD, delta only): immediately before attempt 1 -> after the cache check: -0.06
+
+## appendix: cache_replay.py
+"""Replay the run's `gen task` request through workbench's synthesis proxy against the run's own
+LLM cache, WITHOUT an upstream key: a cache hit is served locally; a miss would reach DeepSeek
+unauthenticated (401, nothing billed). Writes only to scratch, never to the run directory."""
+import json, os, socket, sys
+from pathlib import Path
+
+from workbench.config import Settings
+from workbench.synth.ledger import Ledger
+from workbench.synth.proxy import create_proxy_app
+from workbench.synth.runner import ProxyThread, SynthRunner, default_command_runner
+
+run_dir = Path("data/synth/p13_it_service_desk")
+scratch = Path(sys.argv[1])
+ledger = Ledger(scratch / "replay_ledger.jsonl")
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+app = create_proxy_app(
+    upstream_base_url="https://api.deepseek.com",
+    upstream_api_key=None,  # no key: a cache miss cannot be billed
+    cache_dir=run_dir / "llm_cache",
+    ledger=ledger,
+    max_retries=0,
+)
+runner = SynthRunner(
+    Settings(), run_dir, scenarios=1, scenario_file=run_dir / "local_scenario.jsonl",
+    environ={"AWM_SYN_OVERRIDE_MODEL": "deepseek-flash", "PATH": os.environ["PATH"]},
+)
+step = next(s for s in runner.plan if s.name == "task")
+argv = list(step.argv)
+argv[argv.index("--output") + 1] = str((scratch / "replay_gen_tasks.jsonl").resolve())
+print("replayed step: gen task; argv:", " ".join(argv[1:]))
+with ProxyThread(app, "127.0.0.1", port) as base:
+    rc = default_command_runner(argv, runner.step_env("task", base), scratch / "replay_task.log")
+print("returncode:", rc)
+entries = [json.loads(l) for l in (scratch / "replay_ledger.jsonl").read_text().splitlines() if l.strip()]
+print("replay ledger:", entries)
+orig = [json.loads(l) for l in (run_dir / "gen_tasks.jsonl").read_text().splitlines() if l.strip()]
+new = [json.loads(l) for l in (scratch / "replay_gen_tasks.jsonl").read_text().splitlines() if l.strip()]
+print("replayed tasks identical to the run's gen_tasks.jsonl:", orig == new)

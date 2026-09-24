@@ -557,3 +557,9 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - `GET /models` 返回 `deepseek-flash`、`deepseek-v4-pro`；
   - 文档站点 `sitemap.xml` 中的 API 页面为 create-chat-completion、create-completion、create-response、create-file、list-files、retrieve-file、delete-file、get-user-balance、list-models，没有 embeddings；
   - 价格页与 16:55 UTC 读取时相同（见 `configs/pricing.yaml` 与 `docs/verification/cost-ledger.md` §1）。
+- **执行中核实的事实**（2026-09-24 20:58–21:05 UTC 那次真实运行）：
+  - `awm env check_all` 判定"started"的标准：MCP 连接成功且工具列表非空（`awm/tools.py:201-220`，`async_wait_for_server` → `check_mcp_server`）。
+  - `gen env` 与 `check_all` 的测试 server 用 `start_new_session=True` 启动（`awm/core/env.py:161-172`），不属于调用者的进程组；中断编排进程后仍然存活，临时目录 `/tmp/env_test_*` 也会留下。
+  - AWM 的 `GPTClient` 在第一次请求后把完整请求参数（含 prompt，不含 key）和响应写进日志（`awm/gpt.py:174-177`），所以 `data/synth/<run_id>/logs/` 中有完整 prompt；这些日志不入库。
+  - DeepSeek 响应的 `usage` 含 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens` 与 `completion_tokens_details.reasoning_tokens`。这次运行中前者全部为 0；思考 token 占全部输出 token 的 82,675 / 130,867。
+  - `awm.tools.tools_token_count` 对 `deepseek-flash` 取不到 tiktoken 编码，回退为字符数（`awm/tools.py:353-358`），所以 `gen env` 日志中的 "average tokens per environment" 实际是字符数。
