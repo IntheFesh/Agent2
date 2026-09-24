@@ -356,3 +356,27 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 7. train 环境在 GPU 上的实际安装与运行（UNVERIFIED-LOCAL）。
 8. 官方训练配方是否以非公开形式存在：公开渠道未找到（§4）。
 9. OpenEnv 示例对数据集许可证（CC-BY-4.0）的陈述、以及其夹具中的工具清单，都是第三方信息，未对照 HF 原文核实。
+
+---
+
+## 10. 后续阶段补充核实（Phase 1 起，按阶段追加）
+
+### Phase 1
+
+- 已安装版本（`uv run python -c "import importlib.metadata as m; ..."`）：`mcp 1.26.0`、`langgraph 1.2.12`、`langgraph-checkpoint-sqlite 3.1.1`、`langgraph-checkpoint 4.2.0`、`langchain-core 1.6.4`、`fastapi 0.115.12`、`fastapi-mcp 0.4.0`、`mcp-agent 0.2.6`、`pydantic 2.12.5`、`starlette 0.46.2`、`sse-starlette 3.0.3`、`openai 2.38.0`、`typer 0.21.1`。
+- §9 第 5 条中的一部分已实测确认：`mcp-adapted-bench` 未初始化时，`uv sync` 与 `uv run awm --help` 都能正常运行。
+- `simpleArgParser` 0.2.2 会在解析后调用 dataclass 的 `pre_process()`（`simpleArgParser/s_argparse.py:563-572`）。
+- train 环境 `uv lock` 解析出 244 个包，与 Phase 0 的只解析求解一致：`vllm 0.19.0`、`torch 2.10.0`、`numpy 2.2.6`、`tensordict 0.14.2`。
+
+### Phase 2
+
+- MCP SDK 1.26.0 客户端 API：
+  - `streamablehttp_client(url, headers, timeout, sse_read_timeout, ...)`（`mcp/client/streamable_http.py:686-693`）；
+  - `ClientSession.initialize / call_tool / list_tools`（`mcp/client/session.py:148,368,505`）。
+- 用手写迷你场景对 AWM 启动器做了实测（`python -m awm.core.server --db_path … --temp_server_path … --output_dir …`）：
+  - `list_tools` 返回全部 7 个路由的 operationId；
+  - 枚举参数非法时返回 `isError=True`，文本为 `Input validation error: 'bogus' is not one of ['price', 'rating']`；
+  - 缺少必填参数时返回 `Input validation error: 'product_id' is a required property`；
+  - 服务端抛异常时返回 `Error calling get_product_by_id. Status code: 500. Response: Internal Server Error`；
+  - 查询无结果时返回 `isError=False`，文本为 `'[]'`。
+- §9 第 5 条的孤儿进程风险已实测证实：只终止 `python -m awm.core.server` 这个 launcher，`sh -c … | tee` 以及真正的服务进程都会继续存活。按进程组 `killpg` 之后，三者都能被杀死。本沙箱的 PID 1（`/process_api`）不回收僵尸进程，因此被杀的进程会以 `Z` 状态残留，测试只断言没有存活的非僵尸进程（`workbench/envs/procs.py`）。
