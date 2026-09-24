@@ -413,3 +413,10 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - `TTLConfig.default_ttl` 的单位是分钟（`langgraph/store/base/__init__.py:545`）。
 - 实测：`sweep_ttl` 把带微秒的 `expires_at` 与只到秒的 `CURRENT_TIMESTAMP` 按字符串比较（`base.py:1139`），因此过期要到下一秒才会被清扫。
 - 实测：LangGraph 在恢复被 `interrupt` 暂停的节点时，会从头重新执行该节点。所以 approve 节点在 `interrupt` 之前不做任何有副作用的事，"请求审批"事件改在 act 节点里发出。
+
+### Phase 6
+
+- sse-starlette 3.0.3：客户端断开时，`_listen_for_disconnect` 结束并取消整个任务组（`sse_starlette/sse.py:194-202,262-275`），取消信号会传入流式生成器，再传到 LangGraph 的 `astream`。`tests/unit/test_api.py::test_client_disconnect_cancels_turn` 用手动驱动 ASGI 的方式验证了这一点：正在进行的 LLM 调用被取消，trace 中出现 `cancelled` 事件，会话的"忙"标记被释放。
+- Starlette 不会运行被 mount 的子应用的 lifespan。因此网关的 `StreamableHTTPSessionManager.run()` 由 API 的 lifespan 负责进入（`gateway_app.state.session_manager`）。
+- 本机没有 Docker 守护进程（`/var/run/docker.sock` 不存在），所以只做了 `docker compose config` 校验，没有实际构建镜像。
+- 浏览器验收：`make demo-mock` 启动后，用 `scripts/demo_ui_check.py`（Playwright 驱动 headless Chromium）走完"建会话 → 发消息 → 审批卡片 → 批准 → 最终回答 → DB diff"。最终 diff 显示 `cart_items` 从 1 行变为 2 行，新增主键为 2。
