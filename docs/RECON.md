@@ -271,6 +271,8 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 - 旁证（非一手来源，不作为核实依据）：服务端 WebSearch 的摘要显示该论文存在 v2 版本，且摘要中出现的 3 个数值与任务书 §1.4 一致（对应 registry 中 `bfclv3.overall.8b.*`、`tau2.pass1.14b.awm`、`mcp_universe.success.8b.*`）。
 - 论文的其他格子（τ²-bench 分领域、MCP-Universe 分类别、其余尺寸的基座值）均未能读取，列在 registry 的 `pending` 中。
 
+> **2026-09-24 更新（TASK_v2 Phase 10）**：网络放开后已对照 arXiv v3 Table 4 逐格核对，registry 扩充为 30 条并全部 `verified: true`，`pending` 已清空。见 `docs/verification/2026-09-24-paper-table4.md`。
+
 ## 6. 许可证调查（R6）
 
 完整表格见 `docs/UPSTREAM.md` §3。摘要：
@@ -357,6 +359,8 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 8. 官方训练配方是否以非公开形式存在：公开渠道未找到（§4）。
 9. OpenEnv 示例对数据集许可证（CC-BY-4.0）的陈述、以及其夹具中的工具清单，都是第三方信息，未对照 HF 原文核实。
 
+> **2026-09-24 更新（TASK_v2 Phase 10–11）**：第 1、2、3、9 项已核实（`docs/verification/` 下的 `2026-09-24-paper-table4.md`、`2026-09-24-licenses.md`、`2026-09-24-model-cards.md`、`2026-09-24-dataset.md`）；数据集许可证确为 CC-BY-4.0，OpenEnv 抓取的 7 个工具名与官方 `e_commerce_33` 一致。第 4 项仍成立（AWM 仍无 LICENSE）。第 7 项仍为 UNVERIFIED-LOCAL。
+
 ---
 
 ## 10. 后续阶段补充核实（Phase 1 起，按阶段追加）
@@ -438,3 +442,14 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - `verl/utils/checkpoint/megatron_checkpoint_manager.py:481-506,612-633`。
 
   前两个是参考用的展开文件，不被 Hydra 加载；后者只影响 Megatron 路径（smoke 走 FSDP）。静态键检查会容忍这些标记；权威校验是在 train 环境里由 Hydra 实际组合配置（UNVERIFIED-LOCAL）。
+
+### Phase 10–11（TASK_v2，2026-09-24）：官方数据集与外部事实
+
+- 官方数据集 revision `dde80a0283fe781bdc51656bce57063dc5650213`；字段布局与 §1.6 一致：`gen_scenario`（`name`、`description`）、`gen_tasks`（`scenario`、`tasks`）、`gen_db`（`scenario`、`db_schema`、`db_path`）、`gen_sample`（`scenario`、`tables_count`、`inserts_count`、`sample_data`）、`gen_spec`（`scenario`、`api_spec`）、`gen_envs`（`scenario`、`db_path`、`full_code`）、两个 verifier 文件（`scenario`、`task_idx`、`task`、`verification`）。
+- 两个 verifier 文件含重复的 (scenario, task_idx) 行；AWM 用 `find_scenario_entry` 取第一条匹配（`awm/tools.py:456-472`，调用处 `awm/core/verify.py:383-384`）。
+- 官方环境的返回形态与校验错误文本（在真实启动的 `e_commerce_33` 上实测，`docs/verification/2026-09-24-dataset.md` §3）：
+  - 列表结果包在对象里：`{"products": [], "total": 0}`、`{"cart_id": 1, "items": []}`、`{"payment_methods": [...]}`；删除类工具返回 `{"success": bool}`；
+  - 新的校验错误文本：`Input validation error: 'abc' is not of type 'integer'`（来自 MCP SDK 的 jsonschema 校验，与 §10 Phase 2 记录的 `is not one of` / `is a required property` 同源）；
+  - `e_commerce_33` 的 39 个工具都没有枚举参数，`sort_by` 是自由字符串。
+- 由此修订 ADR-007 为 ADR-014（网关的空结果判定），并按官方接口修正迷你夹具（`docs/verification/2026-09-24-fixture-reconciliation.md`）。
+- Arctic-AWM 模型卡：三个模型的 `chat_template.jinja` 相同，工具调用格式为 Qwen3 的 `<tool_call>` JSON 块；`max_position_embeddings` 为 40960（`docs/verification/2026-09-24-model-cards.md`）。

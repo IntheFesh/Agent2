@@ -1,22 +1,25 @@
 # LIMITATIONS — 未验证项与已知限制
 
-本文件如实列出本仓库**没有做到**或**没有验证**的部分（R8）。标注 UNVERIFIED-LOCAL 的项目在开发沙箱（无 GPU、无 Docker daemon、`huggingface.co` 与 `arxiv.org` 被出口策略拦截）中无法验证；表中写明了验证所需的资源和步骤。
+本文件如实列出本仓库**没有做到**或**没有验证**的部分（R8）。标注 UNVERIFIED-LOCAL 的项目在开发环境中无法验证；表中写明了验证所需的资源和步骤。开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9），之后在真实环境中验证过的项目移到本节末尾的"已验证"列表。
 
 ## 1. UNVERIFIED-LOCAL 项
 
 | # | 项目 | 本仓库提供了什么 | 为什么没验证 | 验证所需资源与步骤 |
 |---|---|---|---|---|
-| U1 | 用 vLLM 服务 Arctic-AWM | `configs/serving/arctic-awm-4b.yaml`、`scripts/serve_vllm.sh`、`workbench serve vllm-cmd`、compose 中的 `vllm` 服务（`gpu` profile） | 无 GPU；无法下载权重；未能阅读模型卡，因此 tool-call parser 与 chat template 默认不设置 | Linux x86_64 + CUDA GPU、HF 访问。执行 `scripts/serve_vllm.sh`，再用 `WORKBENCH_LLM__BACKEND=vllm` 运行 `workbench agent run` |
+| U1 | 用 vLLM 服务 Arctic-AWM | `configs/serving/arctic-awm-4b.yaml`、`scripts/serve_vllm.sh`、`workbench serve vllm-cmd`、compose 中的 `vllm` 服务（`gpu` profile） | 无 GPU。模型卡已于 2026-09-24 读取（`docs/verification/2026-09-24-model-cards.md`），但卡片没有指定 vLLM 的 tool-call parser，因此 parser 与 chat template 仍默认不设置 | Linux x86_64 + CUDA GPU、HF 访问。执行 `scripts/serve_vllm.sh`，再用 `WORKBENCH_LLM__BACKEND=vllm` 运行 `workbench agent run` |
 | U2 | 真实 LLM 驱动的智能体 | `openai_compat` / `vllm` 后端（流式、超时、重试），单测覆盖协议层 | 所有端到端测试都使用 mock 回放 | 一个 OpenAI 兼容端点与 key（见 `.env.example`） |
 | U3 | train 环境安装 | `train/pyproject.toml`、`train/uv.lock`（只锁定；`uv lock --check` 通过） | 需要 CUDA；`flash-attn` 构建依赖 torch | GPU 机器上执行 `cd train && uv sync` |
 | U4 | veRL 嵌套子模块与 Hydra 组合 | `check_override_keys`（静态键检查，曾在 scratch 中针对 fork @001f000 实测）、`hydra_compose_check` | 嵌套子模块默认不初始化（SSH URL）；Hydra 只在 train 环境中存在 | `git -C third_party/AgentFly submodule update --init verl`，然后 `workbench train preflight` |
 | U5 | smoke 训练运行 | `configs/train/smoke.yaml`、`workbench train launch --execute`（产物标 `NO_RESULTS`） | 无 GPU | 单卡 CUDA GPU（preflight 默认要求至少 12000 MiB 可用显存）+ U3 + U4 |
 | U6 | Docker 镜像构建与 compose 启动 | `Dockerfile`、`docker-compose.yml`（`docker compose config` 已通过） | 沙箱中没有 Docker daemon | 有 Docker 的机器上执行 `docker compose up --build` |
-| U7 | 官方数据集下载与接入 | `scripts/download_data.sh`、`make data`、`workbench env search` 等按官方格式读取 | `huggingface.co` 被拦截 | HF 访问；`make data` 后运行 `workbench doctor`，再用官方场景跑 `workbench env up` |
 | U8 | `awm agent` / `awm verify` 各跑一次单任务 | 集成测试用真实 AWM 代码跑通了建库、server、MCP 调用和 `check_all`；UI 的轨迹查看器能读取 `awm agent` 的输出格式 | 两个命令都需要 LLM 端点，`verify --mode sql` 还需要 LLM key | 一个 LLM 端点；在官方或迷你场景上各执行一次，并显式传 `--temp_server_path`、`--db_path`、`--output_dir` |
 | U9 | 合成流水线真实执行 | `workbench synth run --execute`，含 checkpoint、缓存、账本 | 需要 LLM 与 embedding API key；未在本仓库执行过，账本中的价格是占位值 | API key（见 `.env.example`）；小规模试跑 `--scenarios 1` |
 
 CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run 9，提交 `bbb541c`），因此不列为未验证项。此前 run 4–8 失败，原因分别是 detect-secrets 误报和 loguru 在 CI 中强制彩色输出，均已修复。
+
+已于 2026-09-24 在真实环境验证、不再列为未验证项的：
+
+- **官方数据集下载与接入（原 U7）**：`make data` 匿名下载 revision `dde80a0`，8 个文件齐全，条目数与数据集卡一致；`workbench doctor` 的 dataset 一项为 ok；官方 `e_commerce_33` 经 env-manager 真实启动，`list_tools` 返回 39 个工具。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-dataset.md`，日志 `docs/verification/logs/2026-09-24-phase11.log`。
 
 ## 2. 数字与许可证
 
@@ -47,7 +50,9 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 
 ## 6. 其它已知限制
 
-- **迷你夹具的工具名是暂定的**：`tests/fixtures/awm_mini` 的工具名取自 OpenEnv 对 `e_commerce_33` 的抓取记录（RECON §1.6），无法与官方数据集比对。夹具只借用 AWM 的数据格式。
+- **迷你夹具只是官方接口的最小子集**：2026-09-24 已与官方 `e_commerce_33` 对账，夹具 7 个工具的名称、参数名、必填字段与顶层返回字段与官方一致（`docs/verification/2026-09-24-fixture-reconciliation.md`），不再是"暂定"。但夹具只有 7 个工具（官方 39 个），参数、表和列都大幅精简，样例数据、任务与 verifier 为手写；它用来测试机制，不代表官方环境的行为全貌。
+- **上游生成代码的语义缺陷网关无法识别**：在官方 `e_commerce_33` 上观察到，查询不存在的商品 ID 会返回 `id: 0` 的占位对象而不是错误，向购物车加入不存在的 offer ID 也会成功写入。网关只能把它们判为 `ok`（ADR-014），这类问题只能靠审批与 DB diff 暴露。
+- **"空结果"判定是启发式的**：包装对象中所有列表字段都为空、且没有嵌套对象时判为 `empty`（ADR-014）；形态不同的返回可能被判为 `ok`。只在官方 `e_commerce_33` 与迷你夹具上验证过。
 - **风险分级是启发式的**：按工具名动词分级，未知动词默认按 `write` 处理（需要审批）。`workbench gateway export-risk` 导出的表需要人工复核。
 - **每次工具调用新建一个 MCP session**：与 AWM 的做法一致，未做连接池（`docs/IDEAS.md`）。
 - **单进程部署**：审批令牌的"已使用"集合、限流桶、忙碌集合都在进程内存中；多副本部署需要共享存储。
