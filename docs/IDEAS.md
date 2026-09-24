@@ -1,0 +1,8 @@
+# IDEAS — 想法池（R13：只记录，不实现）
+
+1. **在训练中接入 AWM 环境**：可以复用 OpenEnv 的 `agent_world_model_env`（BSD-3，已实现 WebSocket 会话和步级奖励映射），把它作为 AgentFly 的资源后端；也可以写一个 AgentFly 的 `@tool` / `@reward` 插件，通过 env-manager 的 HTTP 接口获取隔离环境。两种做法都需要 GPU 环境做验证，而且必须先确认 AWM 的许可证。
+2. **`awm_meta` 工具协议模式**：Arctic-AWM 在训练时看到的是 AWM 自己的 `list_tools` / `call_tool` 元函数协议（`awm/core/agent.py:88-127`）。可以给 LLM 客户端增加一种"按 AWM 协议对话"的模式，让线上交互更贴近训练时的分布。这需要改造智能体循环，才能处理元函数调用。
+3. **网关的上游连接池**：目前每次工具调用都新建一个 MCP session，与 AWM 的做法一致，可以改为按会话复用连接。
+4. **审批按参数范围放行**：例如"单价低于 X 的加购无需审批"。这需要策略 DSL 和配套的审计。
+5. **合成流水线的并发和预算上限**：在代理层按账本做预算熔断。
+6. **把 AWM 的 `trajectory.json` 转换成本仓库 trace 格式的离线导入器**，这样 UI 能对比同一任务的两种轨迹。

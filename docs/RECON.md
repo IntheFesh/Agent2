@@ -420,3 +420,21 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 - Starlette 不会运行被 mount 的子应用的 lifespan。因此网关的 `StreamableHTTPSessionManager.run()` 由 API 的 lifespan 负责进入（`gateway_app.state.session_manager`）。
 - 本机没有 Docker 守护进程（`/var/run/docker.sock` 不存在），所以只做了 `docker compose config` 校验，没有实际构建镜像。
 - 浏览器验收：`make demo-mock` 启动后，用 `scripts/demo_ui_check.py`（Playwright 驱动 headless Chromium）走完"建会话 → 发消息 → 审批卡片 → 批准 → 最终回答 → DB diff"。最终 diff 显示 `cart_items` 从 1 行变为 2 行，新增主键为 2。
+
+### Phase 7
+
+- `gen scenario` 的 `target_count` 计的是包括种子在内的场景总数：`current_count` 从已有种子开始计（`awm/core/scenario.py:664-695`）。编排层传 `--target_count N`，task 步骤传 `--limit N`（`awm/core/task.py:17`）。所有步骤的参数名都用 `python -m awm.cli gen <step> --help` 实际确认过。
+- AgentFly 注册工具和奖励的方式是 import 时通过装饰器自动注册（`src/agentfly/tools/decorator.py:52`，`src/agentfly/rewards/reward_base.py:298-341`）；训练入口不会自动加载外部插件。
+- 内置工具 `calculator`（`tools/src/calculate/tools.py:6-9`）和奖励 `math_equal_reward_tool(final_response, answer, trajectory)`（`rewards/math_reward.py:492-495`）。数据集格式为 `question` 加其它字段（`README.md:141-160`）。
+- veRL fork @001f000：
+  - Hydra 入口是 `@hydra.main(config_path="config", config_name="ppo_trainer")`（`verl/trainer/main_ppo.py:34`），`ppo_trainer.yaml` 通过 defaults 组合各个组件；
+  - LoRA 键位于 `actor_rollout_ref.model.lora_rank / lora_alpha / target_modules`（`_generated_ppo_trainer.yaml:353,366-368`）；
+  - agent 段在 `agent.init_config.*` 和 `agent.run_config.{max_turns,num_chains,generation_config}` 下（`ppo_trainer.yaml:1-25`）；
+  - trainer 段有 `nnodes / n_gpus_per_node / default_local_dir` 等键（`_generated_ppo_trainer.yaml:780-805`）。
+- **上游不一致 2**：AgentFly 自带的 `examples/train_scripts/train_example.sh:57-103` 使用 `agent.max_turns`、`agent.num_chains`、`agent.init_config.backend`、`agent.generation_config.max_tokens`，这四个键在它固定的 veRL fork 配置中都不存在（已用 `check_override_keys` 实测）。smoke 配置跟随 fork 的实际配置结构。
+- **上游缺陷**：veRL fork @001f000 中残留了未解决的 git 合并冲突标记：
+  - `verl/trainer/config/_generated_ppo_trainer.yaml:177-185`；
+  - `_generated_ppo_megatron_trainer.yaml:64-83`；
+  - `verl/utils/checkpoint/megatron_checkpoint_manager.py:481-506,612-633`。
+
+  前两个是参考用的展开文件，不被 Hydra 加载；后者只影响 Megatron 路径（smoke 走 FSDP）。静态键检查会容忍这些标记；权威校验是在 train 环境里由 Hydra 实际组合配置（UNVERIFIED-LOCAL）。
