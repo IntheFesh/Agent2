@@ -471,3 +471,12 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - 自动起服的 `start_server_process`（`awm/core/server.py:174-195`）不传 `--temp_server_path`，服务代码写到 `--envs_path` 所在目录（`awm/core/server.py:134-138`）。
 - AWM `awm verify --mode sql`：裁判调用 `temperature=1.0, max_completion_tokens=4096`（`awm/core/verify.py:302-310`）；执行期间把两个数据库 chmod 为 0o444，之后恢复（`:111-117`，实测权限已恢复）；`--init_db_path` / `--final_db_path` 优先于运行目录中的默认路径（`:367-368`）；结果写到 `<input>/verify.sql.json`（`:436`）。
 - 单次运行中观察到的模型输出：`awm agent` 第 1 轮 DeepSeek 按 `<tool_call>` 格式调用 `list_tools`，第 2 轮在纯文本中输出 `<｜｜DSML｜｜ calls>…` 标记，AWM 解析出 0 个调用并结束循环（`docs/verification/2026-09-24-llm-chain.md` §4）。这是一次运行的观察，不是对模型的评价。
+
+### Phase 12.5（2026-09-24）：修复阶段用到的上游事实
+
+- FastAPI 0.115.12（app 环境实际安装版本）：
+  - 默认 operationId 由 `generate_unique_id` 生成：`f"{route.name}{route.path_format}"`，`\W` 替换为 `_`，再加 `_<method>`（`fastapi/utils.py:179-184`）；`route.name` 默认为端点函数名，可被装饰器的 `name=` 覆盖（`fastapi/routing.py:490`）；`path_format` 来自 starlette 的 `compile_path`，去掉路径参数的转换器（`fastapi/routing.py:491`）。
+  - OpenAPI 的 operationId = `route.operation_id or route.unique_id`（`fastapi/openapi/utils.py:237,248`；`unique_id` 见 `fastapi/routing.py:501`）。
+- fastapi-mcp 0.4.0：工具名取 OpenAPI 的 operationId，没有 operationId 的操作被跳过（`fastapi_mcp/openapi/convert.py:50-63`，工具构造在 `:263`）。
+- AWM 服务端按场景名建立字典，同名场景取最后一条记录（`third_party/agent-world-model/awm/core/server.py:98-99`）。
+- 官方数据集 revision `dde80a0` 的 `gen_envs.jsonl`：1000 个场景全部能被 `ast` 解析；35062 个路由全部写成 `@app.<method>(..., operation_id="...")` 且为字面量；按方法统计 GET 16688、POST 13819、PATCH 3605、DELETE 574、PUT 376（`docs/verification/logs/2026-09-24-phase12.5-risk-floor.log`）。
