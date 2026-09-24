@@ -393,3 +393,13 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - 带 `X-Workbench-Session` 的 `list_tools` 返回带前缀的工具名；
   - destructive 工具在没有令牌时被拒绝，并写入审计；
   - 带令牌调用成功，DB diff 中 `payment_methods` 被删除的主键为 2。
+
+### Phase 4
+
+- vLLM 源码，v0.19.0 标签（commit `2a69949bdadf0e8942b7a1619b229cb475beef20`，从 GitHub 稀疏克隆，没有安装）：
+  - `gpu_memory_utilization` 默认值 0.9（`vllm/config/cache.py:41`）；`max_model_len` 默认 `None`，由模型配置推导（`vllm/config/model.py:182`）；
+  - `hermes` tool parser 已注册（`vllm/tool_parsers/__init__.py:61`），解析的是 `<tool_call>…</tool_call>`（`hermes_tool_parser.py:61-65`）；
+  - `qwen3` reasoning parser 已注册（`vllm/reasoning/__init__.py:83`）；
+  - `--enable-auto-tool-choice` 必须配合 `--tool-call-parser` 使用（`vllm/entrypoints/openai/cli_args.py:364`）；
+  - 没有开启自动工具选择时，模型输出原样作为 `content` 返回（`vllm/entrypoints/openai/chat_completion/serving.py:1399-1403`）。
+- Arctic-AWM 模型卡仍然读不到。因此 serving 配置沿用 AWM README 中的最简命令（`README.md:210`），不设 parser 和 chat template。客户端会从 `content` 中解析 `<tool_call>`，格式与 `awm/core/agent.py:130-167` 相同。
