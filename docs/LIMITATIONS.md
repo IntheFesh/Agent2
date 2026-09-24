@@ -20,9 +20,12 @@ CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run
 
 ## 2. 数字与许可证
 
-- **论文数字全部未核对**：`results/registry.yaml` 中所有条目 `verified: false`，因为 `arxiv.org` 与 `huggingface.co` 被拦截，数值取自任务书，没有与论文原文比对。`docs/RESULTS.md` 中逐条标注"待核对"。
-- **AWM 没有许可证**：见 `docs/UPSTREAM.md` §3 与 ADR-003。本仓库不包含 AWM 代码副本，也没有 patch；但运行时 import 并执行 AWM 代码，这一点的法律判断由仓库主人负责。
-- **数据集与模型的许可证未核实**：同样因为 HF 被拦截。
+- **论文数字已核对（2026-09-24）**：registry 中 30 条均已对照 arXiv 2602.10090 v3 Table 4 的 HTML 与 PDF 逐格核对，`verified: true`，证据见 `docs/verification/2026-09-24-paper-table4.md`。仍然成立的限制：
+  - 这些是论文报告值，本仓库没有复现，也不能复现（R1）；
+  - 只登记了 Base 与 AWM 两行的 5 列，Table 4 的其它列与 Simulator、EnvScaler 两行未登记；
+  - 发布的 Arctic-AWM-4B / 8B / 14B 权重是否就是 AWM 行所评测的模型，模型卡没有明说，registry 中保持"推定"；8B、14B 模型卡的 `base_model` 元数据写成了 Qwen/Qwen3-4B，与卡片正文矛盾（`docs/verification/2026-09-24-model-cards.md`）。
+- **AWM 没有许可证**：2026-09-24 复查，上游 HEAD 仍为 `85e322f`，仍无 LICENSE；第三方 PR #17 仍未合并（`docs/verification/2026-09-24-licenses.md`）。本仓库不包含 AWM 代码副本，也没有 patch；但运行时 import 并执行 AWM 代码，这一点的法律判断由仓库主人负责（ADR-003）。询问许可证的 issue 草稿见 `docs/verification/awm-license-issue-draft.md`，尚未发送。
+- **数据集与模型许可证已核实**：数据集 CC-BY-4.0（需署名，见 README 与 UPSTREAM §5），三个模型 Apache-2.0。
 
 ## 3. 训练配方的公开状态
 
