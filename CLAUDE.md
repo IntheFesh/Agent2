@@ -32,8 +32,10 @@
 
 冲突处理：任务书与上游不一致时以上游源码为准，停下报告。停止条件见 TASK.md §7。
 
-当前状态（Phase 0 完成，细节见 `docs/RECON.md`）：
-- 上游固定在 AWM `85e322f`、AgentFly `1256586`。嵌套的 `verl` 暂不初始化；`mcp-adapted-bench` 永不使用。
-- 训练配方结论为 (b)：只有环境适配，没有完整官方配方，因此不创建 `paper_mirror` profile。
-- 阻断项：AWM 仓库没有许可证；本环境拦截了 `huggingface.co` 与 `arxiv.org`，registry 全部为 `verified: false`。
+当前状态（Phase 0–8 全部完成；入口见 `README.md`，未验证项见 `docs/LIMITATIONS.md`）：
+- 上游固定在 AWM `85e322f`、AgentFly `1256586`。嵌套的 `verl` 默认不初始化；`mcp-adapted-bench` 永不使用；`patches/` 为空。
+- 训练配方结论为 (b)：只有环境适配，没有完整官方配方，因此不创建 `paper_mirror` profile；smoke 只用 AgentFly 自带工具与奖励（ADR-012）。
+- AWM 仓库没有许可证：按 ADR-003 只引用、不复制、不打补丁。本环境拦截了 `huggingface.co` 与 `arxiv.org`，registry 全部为 `verified: false`。
 - 调用 AWM 时必须显式传 `--temp_server_path`、`--db_path`、`--output_dir`；合成前先复制种子文件。否则会写入官方数据目录或 submodule。
+- AWM server 以进程组启动，必须用 `killpg` 回收；所有命令设置 `PYTHONPYCACHEPREFIX`，避免在 submodule 中留下 `__pycache__`。
+- 改动 README 或 docs 后运行 `make check-numbers`；改动 registry 后运行 `make results`。
