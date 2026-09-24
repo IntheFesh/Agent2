@@ -10,7 +10,6 @@
 | U3 | train 环境安装 | `train/pyproject.toml`、`train/uv.lock`（只锁定；`uv lock --check` 通过） | 需要 CUDA；`flash-attn` 构建依赖 torch | GPU 机器上执行 `cd train && uv sync` |
 | U4 | veRL 嵌套子模块与 Hydra 组合 | `check_override_keys`（静态键检查，曾在 scratch 中针对 fork @001f000 实测）、`hydra_compose_check` | 嵌套子模块默认不初始化（SSH URL）；Hydra 只在 train 环境中存在 | `git -C third_party/AgentFly submodule update --init verl`，然后 `workbench train preflight` |
 | U5 | smoke 训练运行 | `configs/train/smoke.yaml`、`workbench train launch --execute`（产物标 `NO_RESULTS`） | 无 GPU | 单卡 CUDA GPU（preflight 默认要求至少 12000 MiB 可用显存）+ U3 + U4 |
-| U6 | Docker 镜像构建与 compose 启动 | `Dockerfile`、`docker-compose.yml`（`docker compose config` 已通过） | 沙箱中没有 Docker daemon | 有 Docker 的机器上执行 `docker compose up --build` |
 | U8 | `awm agent` / `awm verify` 各跑一次单任务 | 已于 2026-09-24 用 DeepSeek（`deepseek-flash`）各执行 1 次：`awm verify --mode sql` 链路打通；`awm agent` 的 LLM 调用、文本解析与 MCP 工具清单打通（`docs/verification/2026-09-24-llm-chain.md` §4–5） | **部分验证**：`awm agent` 第 2 轮 DeepSeek 在纯文本中输出了它自己的 DSML 工具调用标记，AWM 只识别 `<tool_call>`（`awm/core/agent.py:130-167`），循环提前结束，没有执行任何写操作；按 D3 不改上游、不写适配器 | 一个原生遵循 `<tool_call>` 文本协议的模型端点（例如经 vLLM 服务的 Arctic-AWM，见 U1），用 `--mcp_url` 模式再执行一次（`--scenario` 自动起服有上游缺陷，见 §6） |
 | U9 | 合成流水线的 `gen scenario` 步骤 | `workbench synth run` 的完整模式（不加 `--scenario-file`，从 `gen scenario` 开始） | 本轮没有 embedding 端点：DeepSeek 不提供 embedding 接口（ADR-021）。其余 6 个步骤、断点续跑、缓存、账本与 `check_all` 已于 2026-09-24 真实执行（见下方已验证项） | 一个 OpenAI 兼容的 embedding 端点（AWM 默认用 `text-embedding-3-large`，`awm/core/scenario.py:40-43`）与 `EMBEDDING_OPENAI_API_KEY`；用 `--scenarios 1` 试跑完整模式 |
 
@@ -18,6 +17,14 @@ CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run
 
 已于 2026-09-24 在真实环境验证、不再列为未验证项的：
 
+- **Docker 镜像构建与 compose 启动（原 U6）**：
+  - 本机 `dockerd` 能启动，但 Docker Hub 返回 429，按 D15 改在 GitHub Actions 托管 runner 上验证。
+  - `.github/workflows/docker-smoke.yml` 在 push 到 `phase9-verification` 与 `main` 时运行 `scripts/docker_smoke.py`：构建，启动（不带 `gpu` profile），经 HTTP API 走完"查询 → 写操作 → 审批 → 完成"，最后停止。
+  - 2026-09-24 的两次运行都通过（run 1 提交 `5419a2c`，run 2 提交 `c2a8a08`）。
+  - 只有一个约 880 MB 的镜像，`app` 与 `env-manager` 共用；构建分别用了 15.9 s 与 23.0 s，冷启动 13.4 s 与 15.0 s。这些是单次测量，随 runner 变化。
+  - `gpu` profile 仍未验证（U1）。
+
+  机器：GitHub 托管 runner `ubuntu-24.04`。证据：`docs/verification/2026-09-24-docker-smoke.md`，日志 `docs/verification/logs/2026-09-24-phase14-docker-smoke.log`。
 - **官方数据集下载与接入（原 U7）**：`make data` 匿名下载 revision `dde80a0`，8 个文件齐全，条目数与数据集卡一致；`workbench doctor` 的 dataset 一项为 ok；官方 `e_commerce_33` 经 env-manager 真实启动，`list_tools` 返回 39 个工具。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-dataset.md`，日志 `docs/verification/logs/2026-09-24-phase11.log`。
 - **真实 LLM 驱动的智能体（原 U2）**：`openai_compat` 后端接 DeepSeek（`deepseek-flash`，key 只从环境变量读取），`workbench doctor` 的 llm 一项为 ok；在官方 `e_commerce_33` 任务 0 上执行 1 次 `workbench agent run`，走完"规划 → 读工具 → 审批 → 写工具 → 回答"，DB diff 为 `cart_items` 新增 1 行。单次链路演示，不构成评测。Phase 12.5 的修复完成后，在同一任务上用默认预算再执行了 1 次（提交 `f135189`，WALKTHROUGH §5.3），链路仍然打通。vLLM 后端仍未验证（U1）。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-llm-chain.md`，日志 `docs/verification/logs/2026-09-24-phase12-*.log`。
 - **`awm verify --mode sql` 单次执行（U8 的一半）**：执行官方 verifier 并由 DeepSeek 裁判，写出 `verify.sql.json`；UI 轨迹查看器能渲染这次 `awm agent` 的真实 `trajectory.json`。证据同上。
@@ -92,8 +99,25 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 
     正则扫描排除不了动态访问。仓库主人决定暂不轮换，自己检查 DeepSeek 后台的用量记录，Phase 13 结束后删除这把 key（`user-decisions.md` D12）。
   - **后续安排**：仓库主人决定（`user-decisions.md` D13），`awm verify` 经本地代理只拿占位 key、`workbench train launch` 改用白名单这两项不在当前阶段做。如果执行 Phase 15，这两项作为它的前置修复先完成；否则保留在这里。
-- **合成步骤没有输出上限，代理也没有预算熔断**：AWM 把 `max_tokens` 改名为 `max_completion_tokens` 发出（`awm/gpt.py:160-164`），DeepSeek 忽略这个参数（探针 P4），所以单个请求的输出只受服务端默认上限约束（思考模式 64K token）。本仓库的合成代理只缓存、重试、记账，不做预算熔断（IDEAS 5）。Phase 13 靠运行期间按账本监视、设 ¥6 止损（操作者脚本，不在仓库中）；在途请求要等响应返回才进账本。
-- **中断合成运行后需要手动清理**：`gen env` 与 `awm env check_all` 用 `start_new_session=True` 启动测试 server（`awm/core/env.py:161-172`），它们不在 `workbench synth run` 的进程组里，中断时不会一起结束，AWM 的临时目录 `/tmp/env_test_*` 也会留下。Phase 13 的中断留下了 1 个 server 和 1 个临时目录，已手动清理。
+- **合成步骤没有输出上限；预算熔断会在途超支**：
+  - AWM 把 `max_tokens` 改名为 `max_completion_tokens` 发出（`awm/gpt.py:160-164`），DeepSeek 忽略这个参数（探针 P4），所以单个请求的输出只受服务端默认上限约束（思考模式 64K token）。
+  - Phase 14 起，本地代理按账本累计费用做预算熔断（`synth.budget`，默认 ¥5，ADR-023）。检查发生在转发之前，已经转发、尚未返回的请求照常完成并计费，所以实际花费可能超过上限，超出部分最多是超限那一刻在途请求的费用之和。
+  - 代理没有并发上限（IDEAS 5）。
+  - 价格表中没有的模型会被拒绝（fail closed），换模型前要先补价格或设 `budget: null`。
+  - 熔断只在经代理执行时生效。
+- **中断合成运行后的残留**：
+  - Phase 14 起，runner 把每个步骤放在独立的进程组里。收到 SIGINT/SIGTERM 时，回收步骤及其全部后代所在的进程组，其中包括 AWM 在独立会话中启动的测试 server（ADR-022）。2026-09-24 用真实 AWM 验证：中断落在 `gen env` 中间，没有进程残留。
+  - 仍然存在的限制：
+    - AWM 被 SIGTERM 结束时不执行 `finally`，临时目录 `/tmp/env_test_*` 会留下，需要手动删除；
+    - runner 自己被 SIGKILL 时无法回收；
+    - 找后代依赖 `/proc`，只适用于 Linux；
+    - 从收到信号到停止步骤有一段反应时间（实测最长约 0.3 s），其间步骤可能多发出请求，续跑时由缓存重放或重新生成。
+  - 未完成的步骤重做前，输出先移到 `attempts/<步骤>.<n>/`。这样 AWM 在 `gen env`、`gen verifier` 中自带的续跑不再起作用；请求正文与上次不同时会再次计费。
+- **合成步骤是否成功只看退出码与输出文件**：
+  - 上游持续出错时，AWM 把失败的请求变成空回复（`awm/gpt.py:195-206`），仍以 0 退出并写出结果，runner 会把这个步骤记为完成。
+  - 2026-09-24 的回放重做中，`gen verifier` 的 50 个请求全部得到 404，10 行结果都没有代码，步骤仍被记为完成（`docs/verification/2026-09-24-phase14-synth-resilience.md` §3）。
+  - 代理只记录上游成功的响应，runner 看不到上游错误。只有预算熔断的拒绝会让步骤失败（ADR-023）。
+  - 收尾的 `check_all` 只检查环境能否启动，不检查 verifier。
 - **合成 manifest 每次执行都会重写**：续跑后 `created_at` 是最后一次执行的时间，不是首次创建的时间。
 - **每次工具调用新建一个 MCP session**：与 AWM 的做法一致，未做连接池（`docs/IDEAS.md`）。
 - **单进程部署**：审批令牌的"已使用"集合、限流桶、忙碌集合都在进程内存中；多副本部署需要共享存储。

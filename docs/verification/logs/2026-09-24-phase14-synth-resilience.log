@@ -1,0 +1,87 @@
+# 2026-09-24 Phase 14: synthesis interruption, resume and budget stop (owner decision D17; ADR-022, ADR-023).
+# Zero cost: no paid API was called, DEEPSEEK_API_KEY was removed from every process environment (D14).
+# Machine: Claude Code cloud container (Linux x86_64, no GPU). Engineering facts only; nothing here is an evaluation.
+
+## 1. unit tests at commit 94a743e (real subprocesses, fake upstream on a real local port)
+$ PYTHONPYCACHEPREFIX=$PWD/.cache/pycache uv run pytest -v tests/unit/test_synth_resilience.py
+tests/unit/test_synth_resilience.py::test_interrupt_mid_step_then_resume[db-gen_db.jsonl] PASSED
+tests/unit/test_synth_resilience.py::test_interrupt_mid_step_then_resume[verifier-gen_verifier.jsonl] PASSED
+tests/unit/test_synth_resilience.py::test_budget_stop_fails_the_step_and_a_higher_budget_resumes PASSED
+tests/unit/test_synth_resilience.py::test_proxy_refuses_over_budget_but_serves_the_cache PASSED
+tests/unit/test_synth_resilience.py::test_proxy_fails_closed_without_a_price_and_can_be_disabled PASSED
+tests/unit/test_synth_resilience.py::test_ledger_spent_ignores_cached_and_refused_entries PASSED
+============================== 6 passed in 15.69s ==============================
+
+## 2. negative controls and the ci run 27 failure (each change applied temporarily, then reverted)
+# 2a. old step launcher (subprocess.run in the runner's process group), interrupt tests:
+E            +  where True = alive(5301)
+E            +  where True = alive(5312)
+2 failed, 4 deselected in 10.02s
+# 2b. runner without the set-aside of an unfinished step's outputs, all six tests:
+FAILED tests/unit/test_synth_resilience.py::test_interrupt_mid_step_then_resume[verifier-gen_verifier.jsonl]
+FAILED tests/unit/test_synth_resilience.py::test_budget_stop_fails_the_step_and_a_higher_budget_resumes
+2 failed, 4 passed in 15.38s
+# 2c. ci run 27 (commit c2a8a08, https://github.com/IntheFesh/Agent2/actions/runs/36067444876):
+FAILED tests/unit/test_synth_resilience.py::test_interrupt_mid_step_then_resume[verifier-gen_verifier.jsonl] - assert 3 < 3
+1 failed, 263 passed, 6 skipped, 57 warnings in 63.78s (0:01:03)
+# 2d. the runner's SIGTERM handler delayed by 0.5 s in the test driver, interrupt tests as of c2a8a08
+#     (window = the fake upstream's 0.3 s delay):
+E           assert 3 < 3
+E           assert 3 < 3
+2 failed, 4 deselected in 11.85s
+# 2e. same delays against the tests as of 94a743e (the step's 2nd request held 3 s upstream):
+injected reaction delay 0.5 s: 2 passed, 4 deselected in 12.54s
+injected reaction delay 1.5 s: 2 passed, 4 deselected in 12.62s
+# 2f. signal delivery probe (main thread blocked in waitpid(), a second thread busy in Python), 40 trials:
+{'prompt': 40, 'late': 0} max delay 0.274 s
+
+## 3. real AWM gen steps against a local replay upstream, workbench at commit c2a8a08 (src/ unchanged since)
+# The replay upstream answers with the responses DeepSeek gave in Phase 13 (data/synth/p13_it_service_desk/llm_cache),
+# looked up by the exact request bytes, after 1.5 s; any other request gets HTTP 404. The ledger of this run prices
+# the usage echoed in those recorded responses (CNY 0.7306); they were paid for in Phase 13, nothing reached DeepSeek.
+2026-09-24T22:28:38Z workbench at commit c2a8a08; uncommitted changes under src/: none
+2026-09-24T22:28:38Z $ synth run --scenarios 1 --out data/synth/p14_replay --scenario-file data/synth/p14_replay/local_scenario.jsonl --execute   (OPENAI_BASE_URL = replay upstream on 127.0.0.1:18555; DEEPSEEK_API_KEY not set)
+2026-09-24T22:28:38Z attempt 1: pid 4484 is the runner itself: ['/home/user/Agent2/.venv/bin/workbench', 'synth', 'run']
+2026-09-24T22:29:00Z gen env: 1 ledger row for its LLM response, AWM test server running (pids [4545]); SIGTERM -> runner pid 4484
+2026-09-24T22:29:01Z attempt 1 exit code 130; steps: task done, db done, sample done, spec done, env interrupted
+2026-09-24T22:29:01Z attempt 1 state of env: {"status": "interrupted", "returncode": null, "seconds": 4.5}
+2026-09-24T22:29:01Z AWM test servers still running: []
+2026-09-24T22:29:01Z AWM temp dirs left in /tmp: ['/tmp/env_test_1b52f5e8hrgxjqa7']
+2026-09-24T22:29:01Z attempt 1 last line: ['interrupted during step env; run the same command again to resume']
+2026-09-24T22:29:01Z attempt 1 at the replay upstream: 5 requests, 5 recorded in Phase 13, 0 not recorded (HTTP 404)
+2026-09-24T22:29:01Z attempt 2 (same command): pid 4546
+2026-09-24T22:30:09Z attempt 2 exit code 0; steps: task done, db done, sample done, spec done, env done, verifier done
+2026-09-24T22:30:09Z attempt 2 state of env: {"status": "done", "returncode": 0, "seconds": 7.2}
+2026-09-24T22:30:09Z ledger rows written by attempt 2: env (cache hit)
+2026-09-24T22:30:09Z attempt 2 at the replay upstream: 175 requests, 0 recorded in Phase 13, 175 not recorded (HTTP 404)
+2026-09-24T22:30:09Z AWM test servers still running: []
+2026-09-24T22:30:09Z gen_scenario.jsonl: identical to Phase 13's (1 rows)
+2026-09-24T22:30:09Z gen_tasks.jsonl: identical to Phase 13's (1 rows)
+2026-09-24T22:30:09Z gen_db.jsonl: differs from Phase 13's (1 vs 1 rows) at 1 values; fields: ['.db_path']
+2026-09-24T22:30:09Z gen_sample.jsonl: identical to Phase 13's (1 rows)
+2026-09-24T22:30:09Z gen_spec.jsonl: identical to Phase 13's (1 rows)
+2026-09-24T22:30:09Z gen_envs.jsonl: differs from Phase 13's (1 vs 1 rows) at 1 values; fields: ['.db_path']
+2026-09-24T22:30:09Z gen_verifier.jsonl: differs from Phase 13's (10 vs 10 rows) at 20 values; fields: ['.verification.code', '.verification.raw_response']
+2026-09-24T22:30:09Z gen_verifier.jsonl rows without code: 10 of 10 (Phase 13: 0 of 10)
+2026-09-24T22:30:09Z validation identical to Phase 13's: True (1/1 started, 15 tools)
+
+## 3a. data/synth/p14_replay/logs/env.log, attempt 1 (interrupted while AWM tests the generated server)
+2026-09-24 22:28:58.825 | INFO     | awm.gpt:__init__:40 - Using provider from environment variable: openai overriding the args provider: openai
+2026-09-24 22:28:58.825 | WARNING  | awm.gpt:__init__:44 - Using model from environment variable: deepseek-flash overriding any requested model
+2026-09-24 22:28:58.863 | INFO     | awm.core.env:generate_all_environments:370 - generating 1/1 scenarios (skipped 0 validated)
+2026-09-24 22:28:58.863 | INFO     | awm.core.env:generate_all_environments:426 - Sending batch requests (Attempt 1/5) count=1...
+2026-09-24 22:29:00.768 | INFO     | awm.gpt:_call_async:177 - Using model: deepseek-flash for request
+2026-09-24 22:29:00.770 | INFO     | awm.core.env:generate_all_environments:441 - Processing response for local_it_service_desk: 54388 chars
+2026-09-24 22:29:00.787 | SUCCESS  | awm.core.env:generate_all_environments:459 - local_it_service_desk: 54388 chars of code
+2026-09-24 22:29:00.787 | INFO     | awm.core.env:batch_test_environments:242 - testing 1 environments in parallel (max_workers=1)...
+2026-09-24 22:29:00.899 | DEBUG    | awm.core.env:test_run_specific_env:153 - local_it_service_desk is testing on port 57695, temp_dir=/tmp/env_test_1b52f5e8hrgxjqa7
+
+## 3b. data/synth/p14_replay/logs/verifier.log, attempt 2: every request answered 404, AWM still exits 0
+# 150 'Error in GPT request' and 50 'Max retries exceeded' lines: 50 requests, 3 attempts each (awm/gpt.py:168-206).
+# The replay upstream logged 175 requests with 50 distinct bodies (25 bodies 3 times, 25 bodies 4 times), all
+# answered 404; where the 25 extra sends come from was not traced. First and last error line:
+2026-09-24 22:29:12.029 | ERROR    | awm.gpt:_call_async:196 - Error in GPT request: Error code: 404 - {'error': {'message': 'request not recorded in Phase 13'}}
+2026-09-24 22:29:59.207 | ERROR    | awm.gpt:_call_async:196 - Error in GPT request: Error code: 404 - {'error': {'message': 'request not recorded in Phase 13'}}
+2026-09-24 22:29:59.208 | INFO     | awm.core.verifier:_save_pending_results:176 - Saved 10 results to /home/user/Agent2/data/synth/p14_replay/gen_verifier.json
+2026-09-24 22:29:59.208 | INFO     | awm.core.verifier:process_tasks:459 - Progress: 10/10 tasks completed, 0 pending
+2026-09-24 22:29:59.208 | INFO     | awm.core.verifier:run:492 - Done verification generation!config=Config(input_task='/home/user/Agent2/data/synth/p14_replay/

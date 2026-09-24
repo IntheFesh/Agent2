@@ -563,3 +563,41 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - AWM 的 `GPTClient` 在第一次请求后把完整请求参数（含 prompt，不含 key）和响应写进日志（`awm/gpt.py:174-177`），所以 `data/synth/<run_id>/logs/` 中有完整 prompt；这些日志不入库。
   - DeepSeek 响应的 `usage` 含 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens` 与 `completion_tokens_details.reasoning_tokens`。这次运行中前者全部为 0；思考 token 占全部输出 token 的 82,675 / 130,867。
   - `awm.tools.tools_token_count` 对 `deepseek-flash` 取不到 tiktoken 编码，回退为字符数（`awm/tools.py:353-358`），所以 `gen env` 日志中的 "average tokens per environment" 实际是字符数。
+
+### Phase 14（2026-09-24）：中断续跑、预算熔断与 Docker 冒烟用到的事实
+
+- **AWM 各 gen 步骤怎样写输出**（AWM @ `85e322f`）：
+  - 结束时一次覆盖写出：
+    - `gen scenario`（`awm/core/scenario.py:629`）、`gen task`（`task.py:142`）、`gen db`（`db.py:259`）、`gen sample`（`sample.py:282`）、`gen spec`（`spec.py:120`）；
+    - `gen env`（`env.py:568`）。它自带的续跑只保留 `full_code` 长度大于 10 的已有结果（`load_existing_env_results`，`:120-131`），重新测试通过的才跳过（`:334-370`）。
+  - `gen verifier` 每处理一批就追加写入（`_save_pending_results`，`verifier.py:172-176`，每批之后调用，`:456`）。续跑时：
+    - 读取已有结果（`:145-156`）；
+    - 执行已有代码，只保留执行通过的（`:260-295`）；
+    - 其余重新生成，追加在文件后面（`:300-308`）。
+  - `gen sample` 插入样例数据之前先重建数据库（`sample.py:210-212` 调用 `db.py:64-72` 的 `create_sqlite_database`，旧文件先删除），所以重跑不会在旧数据上重复插入。
+  - `awm verify` 用 `find_scenario_entry` 取**第一条**匹配的行（`awm/tools.py:456-472`；调用处 `awm/core/verify.py:384-385`）。
+- **AWM 测试 server 与临时目录**（`awm/core/env.py`）：
+  - 临时目录由 `tempfile.mkdtemp(prefix=f"env_test_{unique_id}")` 创建（`:148`）；
+  - server 以 `start_new_session=True` 启动（`:161-172`），正常路径上用 `killpg` 回收（`:212-227`）；
+  - 临时目录在 `finally` 中删除（`:230-235`）。AWM 没有注册任何信号处理函数或 `atexit`（在 `awm/` 中搜索 `signal.signal`、`atexit` 均无结果），所以被 SIGTERM 结束时这段 `finally` 不会执行。
+- **AWM `GPTClient` 的错误处理**（`awm/gpt.py`）：
+  - `_call_async` 共尝试 `max_retry_num` 次，默认 3 次（`:36`、`:168`）；
+  - `BadRequestError`、`InternalServerError` 与其它异常都在间隔 3 秒、6 秒后重试（`:179-204`）；
+  - 最后返回一个内容为空的 refusal completion（`:205-206`，构造见 `:103-131`），不抛出异常；
+  - 并发上限默认 64（`:36`）。
+- **openai SDK 2.38.0**（app 环境 `.venv`）：
+  - 402 映射为普通的 `APIStatusError`（异步客户端的 `_make_status_error`，`openai/_client.py:1081-1112`）；
+  - SDK 自己只重试 408、409、429 与 5xx，以及带 `x-should-retry` 头的响应（`_should_retry`，`openai/_base_client.py:795-826`）；默认重试 2 次（`openai/_constants.py:10`）。
+- **uvicorn 0.40.0 的停止过程**：
+  - 先停止接收新连接，再等待在途请求完成（`uvicorn/server.py:265-281`）；
+  - `timeout_graceful_shutdown` 默认为 `None`，即不限时（`uvicorn/config.py:217`）。
+  - `ProxyThread.__exit__` 最多等 5 秒（`src/workbench/synth/runner.py`）。因此 runner 退出时，代理里在途的请求会完成并记入账本。这是 ci run 27 中第 3 个请求被记账的原因（ADR-022）。
+- **信号投递实测**（Claude Code 云端容器）：
+  - 场景：主线程阻塞在 `waitpid()`，另一个线程持续执行 Python 代码；
+  - 40 次试验中，SIGTERM 的处理函数都在子进程结束之前运行；
+  - 从发信号到处理函数运行最长 0.274 s。
+  - 结论：进程收到的信号在这个环境里会打断主线程，但反应时间不是即时的。
+- **Docker**：
+  - 本机：`dockerd` 29.3.1 能启动。拉取 `python:3.12-slim` 时，`registry-1.docker.io` 返回 `429 Too Many Requests`（日志 `docs/verification/logs/2026-09-24-phase14-docker-smoke.log` §1）。
+  - 沙箱说明（`/root/.ccr/README.md` "docker build / docker run"）：容器内的进程连不到出口代理，也不信任它的 CA。绕过需要在 Dockerfile 里安装沙箱 CA，而这项改动只对这个沙箱有意义。
+  - GitHub 托管 runner：`ubuntu-24.04` 镜像 `20260920.314.1`，Docker 28.0.4，Compose 2.38.2（docker-smoke run 1 的日志）。

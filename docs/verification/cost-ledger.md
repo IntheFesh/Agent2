@@ -42,3 +42,9 @@ DeepSeek 官方价格页 `https://api-docs.deepseek.com/zh-cn/quick_start/pricin
 **Phase 12.5 小计（上界口径）：¥0.7499**（只有第 6 行一次计费调用；第 1–5 项修复的测量全部离线；运行前的 `workbench doctor`（`GET /models`）与前后两次余额查询不计费）。**累计：¥1.9156**，仍低于 D4 的 ¥15 提示线与 N3 的 ¥30 上限。第 6 行前后账户余额（USD）的差值不足 1 美分。
 
 **Phase 13 小计（上界口径）：¥1.2240**（第 7 行；合成代理按上游返回的 `usage` 逐条记账，输入与输出分开计价）。**累计：¥3.1396**，仍低于 D4 的 ¥15 提示线与 N3 的 ¥30 上限。第 7 行前后账户余额（USD）减少 6 美分。这次运行在空闲时段（北京时间周五凌晨），空闲时段价格为高峰时段的一半；DeepSeek 返回的 `usage` 中 `prompt_cache_hit_tokens` 全部为 0，输入都按缓存未命中计。余额只精确到美分，而且不确定扣费是否即时，余额差只用于交叉核对。
+
+**Phase 14 小计：¥0**。本阶段没有调用任何付费 API（D14）：
+- 中断续跑的重做使用本地回放上游，单测使用本地假上游，这些进程的环境中都没有 `DEEPSEEK_API_KEY`；
+- Docker 冒烟在 GitHub Actions 上使用 mock LLM。
+
+回放运行的账本显示 ¥0.7306，这是按 Phase 13 已付费响应中的 `usage` 计价得到的数，不是新的花费（`docs/verification/2026-09-24-phase14-synth-resilience.md` §3）。**累计仍为 ¥3.1396。**
