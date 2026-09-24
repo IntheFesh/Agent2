@@ -59,7 +59,7 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 - **官方多工具场景的 token 开销**：act 节点把工具定义同时放进 system prompt 与原生 `tools` 参数。在 39 个工具的官方 `e_commerce_33` 上，每次 act 调用约 26K token，默认 `agent.token_budget=60000` 会在第 3 次 act 之前触发终止。2026-09-24 的单次演示用环境变量把预算设为 400000；默认值是按迷你夹具（7 个工具）设定的，没有修改。
 - **`llm.max_tokens` 含思考 token**：DeepSeek 把思考 token 计入输出 token（探针 P3），默认 2048 可能不够，单次演示设为 8192。
 - **AWM 的输出上限参数对 DeepSeek 不生效**：`awm agent` 与 `awm verify` 发送 `max_completion_tokens`（`awm/core/agent.py:370`、`awm/core/verify.py:309`），DeepSeek 接受但忽略（探针 P4），因此这两个命令对 DeepSeek 没有客户端输出上限。
-- **审计脱敏误伤时间戳**：`src/workbench/gateway/audit.py:17` 的 `PHONE` 正则会把带微秒的 ISO 时间戳（例如 `17:05:31.506430`）中的 `31.506430` 替换成 `[PHONE]`。只影响审计摘要（`result_summary`），trace 与交给模型的工具结果不受影响。Phase 12 只记录，未修改。
+- **审计脱敏是启发式的**：Phase 12 发现 `PHONE` 正则会把带微秒的时间戳（`17:05:31.506430`）和空格分隔的时间戳（`2026-09-23 17:05:16`）的一部分替换成 `[PHONE]`，Phase 12.5 已收紧正则修复（ADR-016）。仍然存在的限制：紧跟在"数字:"之后、或后面紧接":数字"的电话号码不会被脱敏；非 ISO 格式的日期（例如 `24.09.2026`）仍可能被当成电话号码；脱敏只作用于审计摘要，trace 中的工具结果不做脱敏。
 - **每次工具调用新建一个 MCP session**：与 AWM 的做法一致，未做连接池（`docs/IDEAS.md`）。
 - **单进程部署**：审批令牌的"已使用"集合、限流桶、忙碌集合都在进程内存中；多副本部署需要共享存储。
 - **长期记忆的 TTL 精度为秒级**（LangGraph `SqliteStore` 的实现）。
