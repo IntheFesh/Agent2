@@ -44,3 +44,13 @@
 | D13 | ADR-019 遗留的两处隔离缺口 | (a) `awm verify` 经本地代理运行、只拿占位 key；(b) `workbench train launch` 改用白名单。**两项都不在当前阶段做。** 如果仓库主人决定执行 Phase 15，这两项作为 Phase 15 的前置修复（先修再跑）；否则保留在 LIMITATIONS。 |
 
 N5 核对（2026-09-24）：§2 中"本轮结束后从 `phase9-verification` 向 `main` 开 PR"记为已授权、待本轮最后一个阶段结束后执行，与仓库主人的说法一致，无需更正。（`TASK_v2.md` N5 中该项的复选框未勾选；以本文件记录的对话授权为准。）
+
+## 6. Phase 13 报告之后（2026-09-24）
+
+| # | 主题 | 决定 |
+|---|---|---|
+| D14 | `DEEPSEEK_API_KEY` | 仓库主人删除这把 key；**之后所有阶段不得依赖它**，也不再调用任何付费 API。 |
+| D15 | Phase 14（Docker） | 先尝试在容器内启动 `dockerd`。起不来时不必停下等仓库主人，改为在 GitHub Actions 中新增 `docker-smoke` 任务（托管的 ubuntu runner 自带 Docker）：<br>- 触发：push 到 `phase9-verification` 与 `main`；<br>- 步骤：`docker compose build` → `docker compose up -d`（不带 gpu profile）→ 用 mock 后端做一次 API 级冒烟（查询 → 写操作 → 审批 → 完成）→ `docker compose down`；<br>- 用脚本实测镜像大小与冷启动耗时，打印到 job 日志；<br>- 以 CI run 链接和日志摘录作为 U6 的证据，写进 `docs/verification/`；<br>- 只允许为让构建通过而修改 Dockerfile / compose，并补 ADR。 |
+| D16 | compose 中的 vllm 服务 | 授权在 `docker-compose.yml` 的 vllm 命令中加上 `--enable-auto-tool-choice --tool-call-parser hermes`，并加单测断言 compose 中 vllm 的参数与 `configs/serving/arctic-awm-4b.yaml` 一致，防止再次漂移。 |
+| D17 | 两项零成本工作（不调用任何付费 API） | (a) 用本地假上游代替 DeepSeek，重做"步骤中途中断后续跑"：确认中断确实落在某个 gen 步骤中间，续跑后结果正确；上次信号发错进程组的问题一并修正。<br>(b) 合成预算熔断：本地代理按账本累计费用，超过上限时拒绝转发并让当前步骤失败，提高上限后可以续跑；上限在配置中设置，默认 ¥5；补单测、写 ADR。 |
+| D18 | Phase 15 | **要做，采用 runbook 模式**：仓库主人在自己租的 GPU 机器上手动执行，那台机器上不运行 Claude Code。<br>- 先在当前容器完成 D13 的两项前置修复（`awm verify` 经本地代理运行、`train launch` 改用白名单），离线测试通过。<br>- 再写 `docs/runbooks/phase15-gpu.md`：机器要求（显存、CUDA 版本、磁盘）；从零开始的逐条命令及每步的预期输出与判定标准；需要回贴的日志清单与脱敏要求；预计耗时。<br>- 分两段：15A（24GB 显卡）：vLLM 服务 Arctic-AWM-4B，`vllm` 后端的 `workbench agent run`、`awm agent`、`awm verify` 各 1 次；15B（A100 级别）：安装 train 环境、preflight、smoke 训练（不超过 5 step）。<br>- 机器可能在国内（AutoDL），访问 Hugging Face 与 GitHub 受限：runbook 给出用 `HF_ENDPOINT` 从镜像站下载的方式，并标明哪些步骤需要外网。<br>- `awm verify`：从源码确认 `--mode code` 能否不需要 LLM 裁判；需要裁判时指向本机 vLLM 服务，并在 runbook 中注明"裁判为 Arctic-AWM-4B，仅用于打通链路"。<br>- 仓库主人回贴日志后，再更新 U1、U3、U4、U5、U8 与 LIMITATIONS。 |
