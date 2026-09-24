@@ -32,7 +32,7 @@
 
 冲突处理：任务书与上游不一致时以上游源码为准，停下报告。停止条件见 TASK.md §7。
 
-当前状态（Phase 0–8 全部完成；入口见 `README.md`，未验证项见 `docs/LIMITATIONS.md`）：
+当前状态（Phase 0–8 全部完成，TASK_v2 的 Phase 9–12 已完成；入口见 `README.md`，未验证项见 `docs/LIMITATIONS.md`）：
 - 上游固定在 AWM `85e322f`、AgentFly `1256586`。嵌套的 `verl` 默认不初始化；`mcp-adapted-bench` 永不使用；`patches/` 为空。
 - 训练配方结论为 (b)：只有环境适配，没有完整官方配方，因此不创建 `paper_mirror` profile；smoke 只用 AgentFly 自带工具与奖励（ADR-012）。
 - AWM 仓库没有许可证：按 ADR-003 只引用、不复制、不打补丁（2026-09-24 复查仍无）。数据集 CC-BY-4.0（须署名），模型 Apache-2.0。
@@ -40,4 +40,6 @@
 - 官方数据集用 `make data` 下载到 `data/awm1k`（revision `dde80a0`，不入库）；依赖它的测试标 `official_data`，无数据时自动 skip。迷你夹具的接口已与官方 `e_commerce_33` 对账。
 - 调用 AWM 时必须显式传 `--temp_server_path`、`--db_path`、`--output_dir`；合成前先复制种子文件。否则会写入官方数据目录或 submodule。
 - AWM server 以进程组启动，必须用 `killpg` 回收；所有命令设置 `PYTHONPYCACHEPREFIX`，避免在 submodule 中留下 `__pycache__`。
+- 真实 LLM 用 DeepSeek `deepseek-flash`（base URL `https://api.deepseek.com`）；key 只从 `DEEPSEEK_API_KEY` 读取，只在进程环境里映射给 `OPENAI_API_KEY` 等变量。每次外部调用前先估算并记入 `docs/verification/cost-ledger.md`（上界口径）。Phase 12 的三条链路各已执行 1 次，不得重跑（N2）。
+- `awm agent` 只用 `--mcp_url` 模式连接 env-manager 会话：`--scenario` 自动起服结束时必抛 `SameFileError`，还会把服务代码写到 `--envs_path` 目录。
 - 改动 README 或 docs 后运行 `make check-numbers`；改动 registry 后运行 `make results`。

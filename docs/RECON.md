@@ -453,3 +453,21 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - `e_commerce_33` 的 39 个工具都没有枚举参数，`sort_by` 是自由字符串。
 - 由此修订 ADR-007 为 ADR-014（网关的空结果判定），并按官方接口修正迷你夹具（`docs/verification/2026-09-24-fixture-reconciliation.md`）。
 - Arctic-AWM 模型卡：三个模型的 `chat_template.jinja` 相同，工具调用格式为 Qwen3 的 `<tool_call>` JSON 块；`max_position_embeddings` 为 40960（`docs/verification/2026-09-24-model-cards.md`）。
+
+### Phase 12（TASK_v2，2026-09-24）：真实 LLM 链路
+
+- DeepSeek API（官方文档 2026-09-24 16:55–16:57 UTC 用 curl 读取；`GET /models` 实测）：
+  - 模型名 `deepseek-flash`（`/models` 返回 `name: DeepSeek-V4.1-Flash`，`context_window` 1048576，`max_output_tokens` 393216）；OpenAI 格式 base URL 为 `https://api.deepseek.com`（价格页）。`/models` 中没有 `deepseek-chat`。
+  - 思考模式默认开启，默认强度 high；用 `{"thinking": {"type": "disabled"}}` 或 `reasoning_effort: "none"` 关闭（`/guides/thinking_mode`、`/api/create-chat-completion`）。思考模式下 `temperature` 不生效（不报错）。
+  - 文档：带 `tools` 的请求必须在后续请求中回传 `reasoning_content`，否则返回 400。**实测不一致**：P1、P3 探针中省略 `reasoning_content` 的请求返回 200（2026-09-24 17:02 UTC）。
+  - `usage` 中 `completion_tokens` 包含 `completion_tokens_details.reasoning_tokens`，另有 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`（P3 原始响应）。
+  - `max_completion_tokens` 不在 API 参考中；实测被接受但被忽略（P4，OpenAI Python SDK 2.38.0：要求 16，实际输出 536 个 token）。
+  - 流式响应中原生 `tool_calls` 按 `index` 分片、最后一个 chunk 带 `usage`，本仓库 `openai_compat.py` 的解析与之兼容（P1、P2）。
+  - 证据：`docs/verification/2026-09-24-llm-chain.md` §1–2，`docs/verification/logs/2026-09-24-phase12-doctor-probe.log`。
+- AWM `awm agent` 的 LLM 调用（本阶段核实）：
+  - `generate_response` 发送 `max_completion_tokens=config.max_tokens` 与 `temperature`（`awm/core/agent.py:367-372`）；非 vLLM 端点时工具结果以 user 消息 `Tool response:\n…` 回传（`awm/core/agent.py:362-365`）；只读取 `message.content` 并用 `<tool_call>` 正则解析（`awm/core/agent.py:383-384`，正则 `:132`）。
+  - `--scenario` + `--task_id` 与 `--mcp_url` 可以同时给：任务从 `--tasks_path` 查出（`awm/core/agent.py:398-407`），`--mcp_url` 存在时不自动起服、也不准备数据库（`:433-458`），`trajectory.json` 仍记录 scenario 与 task_id。
+  - **上游缺陷**：自动起服时 `_prepare_database` 把工作库建成 `<output_dir>/final.db`（`awm/core/server.py:70-82`），结束时 `run_agent` 又 `shutil.copy2` 到同一路径（`awm/core/agent.py:596-598`），抛 `shutil.SameFileError`。已在不调用 LLM 的情况下调用上游函数复现（`docs/verification/logs/2026-09-24-phase12-awm-agent.log`）。
+  - 自动起服的 `start_server_process`（`awm/core/server.py:174-195`）不传 `--temp_server_path`，服务代码写到 `--envs_path` 所在目录（`awm/core/server.py:134-138`）。
+- AWM `awm verify --mode sql`：裁判调用 `temperature=1.0, max_completion_tokens=4096`（`awm/core/verify.py:302-310`）；执行期间把两个数据库 chmod 为 0o444，之后恢复（`:111-117`，实测权限已恢复）；`--init_db_path` / `--final_db_path` 优先于运行目录中的默认路径（`:367-368`）；结果写到 `<input>/verify.sql.json`（`:436`）。
+- 单次运行中观察到的模型输出：`awm agent` 第 1 轮 DeepSeek 按 `<tool_call>` 格式调用 `list_tools`，第 2 轮在纯文本中输出 `<｜｜DSML｜｜ calls>…` 标记，AWM 解析出 0 个调用并结束循环（`docs/verification/2026-09-24-llm-chain.md` §4）。这是一次运行的观察，不是对模型的评价。

@@ -7,12 +7,11 @@
 | # | 项目 | 本仓库提供了什么 | 为什么没验证 | 验证所需资源与步骤 |
 |---|---|---|---|---|
 | U1 | 用 vLLM 服务 Arctic-AWM | `configs/serving/arctic-awm-4b.yaml`、`scripts/serve_vllm.sh`、`workbench serve vllm-cmd`、compose 中的 `vllm` 服务（`gpu` profile） | 无 GPU。模型卡已于 2026-09-24 读取（`docs/verification/2026-09-24-model-cards.md`），但卡片没有指定 vLLM 的 tool-call parser，因此 parser 与 chat template 仍默认不设置 | Linux x86_64 + CUDA GPU、HF 访问。执行 `scripts/serve_vllm.sh`，再用 `WORKBENCH_LLM__BACKEND=vllm` 运行 `workbench agent run` |
-| U2 | 真实 LLM 驱动的智能体 | `openai_compat` / `vllm` 后端（流式、超时、重试），单测覆盖协议层 | 所有端到端测试都使用 mock 回放 | 一个 OpenAI 兼容端点与 key（见 `.env.example`） |
 | U3 | train 环境安装 | `train/pyproject.toml`、`train/uv.lock`（只锁定；`uv lock --check` 通过） | 需要 CUDA；`flash-attn` 构建依赖 torch | GPU 机器上执行 `cd train && uv sync` |
 | U4 | veRL 嵌套子模块与 Hydra 组合 | `check_override_keys`（静态键检查，曾在 scratch 中针对 fork @001f000 实测）、`hydra_compose_check` | 嵌套子模块默认不初始化（SSH URL）；Hydra 只在 train 环境中存在 | `git -C third_party/AgentFly submodule update --init verl`，然后 `workbench train preflight` |
 | U5 | smoke 训练运行 | `configs/train/smoke.yaml`、`workbench train launch --execute`（产物标 `NO_RESULTS`） | 无 GPU | 单卡 CUDA GPU（preflight 默认要求至少 12000 MiB 可用显存）+ U3 + U4 |
 | U6 | Docker 镜像构建与 compose 启动 | `Dockerfile`、`docker-compose.yml`（`docker compose config` 已通过） | 沙箱中没有 Docker daemon | 有 Docker 的机器上执行 `docker compose up --build` |
-| U8 | `awm agent` / `awm verify` 各跑一次单任务 | 集成测试用真实 AWM 代码跑通了建库、server、MCP 调用和 `check_all`；UI 的轨迹查看器能读取 `awm agent` 的输出格式 | 两个命令都需要 LLM 端点，`verify --mode sql` 还需要 LLM key | 一个 LLM 端点；在官方或迷你场景上各执行一次，并显式传 `--temp_server_path`、`--db_path`、`--output_dir` |
+| U8 | `awm agent` / `awm verify` 各跑一次单任务 | 已于 2026-09-24 用 DeepSeek（`deepseek-flash`）各执行 1 次：`awm verify --mode sql` 链路打通；`awm agent` 的 LLM 调用、文本解析与 MCP 工具清单打通（`docs/verification/2026-09-24-llm-chain.md` §4–5） | **部分验证**：`awm agent` 第 2 轮 DeepSeek 在纯文本中输出了它自己的 DSML 工具调用标记，AWM 只识别 `<tool_call>`（`awm/core/agent.py:130-167`），循环提前结束，没有执行任何写操作；按 D3 不改上游、不写适配器 | 一个原生遵循 `<tool_call>` 文本协议的模型端点（例如经 vLLM 服务的 Arctic-AWM，见 U1），用 `--mcp_url` 模式再执行一次（`--scenario` 自动起服有上游缺陷，见 §6） |
 | U9 | 合成流水线真实执行 | `workbench synth run --execute`，含 checkpoint、缓存、账本 | 需要 LLM 与 embedding API key；未在本仓库执行过，账本中的价格是占位值 | API key（见 `.env.example`）；小规模试跑 `--scenarios 1` |
 
 CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run 9，提交 `bbb541c`），因此不列为未验证项。此前 run 4–8 失败，原因分别是 detect-secrets 误报和 loguru 在 CI 中强制彩色输出，均已修复。
@@ -20,6 +19,8 @@ CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run
 已于 2026-09-24 在真实环境验证、不再列为未验证项的：
 
 - **官方数据集下载与接入（原 U7）**：`make data` 匿名下载 revision `dde80a0`，8 个文件齐全，条目数与数据集卡一致；`workbench doctor` 的 dataset 一项为 ok；官方 `e_commerce_33` 经 env-manager 真实启动，`list_tools` 返回 39 个工具。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-dataset.md`，日志 `docs/verification/logs/2026-09-24-phase11.log`。
+- **真实 LLM 驱动的智能体（原 U2）**：`openai_compat` 后端接 DeepSeek（`deepseek-flash`，key 只从环境变量读取），`workbench doctor` 的 llm 一项为 ok；在官方 `e_commerce_33` 任务 0 上执行 1 次 `workbench agent run`，走完"规划 → 读工具 → 审批 → 写工具 → 回答"，DB diff 为 `cart_items` 新增 1 行。单次链路演示，不构成评测。vLLM 后端仍未验证（U1）。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-llm-chain.md`，日志 `docs/verification/logs/2026-09-24-phase12-*.log`。
+- **`awm verify --mode sql` 单次执行（U8 的一半）**：执行官方 verifier 并由 DeepSeek 裁判，写出 `verify.sql.json`；UI 轨迹查看器能渲染这次 `awm agent` 的真实 `trajectory.json`。证据同上。
 
 ## 2. 数字与许可证
 
@@ -53,9 +54,14 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 - **迷你夹具只是官方接口的最小子集**：2026-09-24 已与官方 `e_commerce_33` 对账，夹具 7 个工具的名称、参数名、必填字段与顶层返回字段与官方一致（`docs/verification/2026-09-24-fixture-reconciliation.md`），不再是"暂定"。但夹具只有 7 个工具（官方 39 个），参数、表和列都大幅精简，样例数据、任务与 verifier 为手写；它用来测试机制，不代表官方环境的行为全貌。
 - **上游生成代码的语义缺陷网关无法识别**：在官方 `e_commerce_33` 上观察到，查询不存在的商品 ID 会返回 `id: 0` 的占位对象而不是错误，向购物车加入不存在的 offer ID 也会成功写入。网关只能把它们判为 `ok`（ADR-014），这类问题只能靠审批与 DB diff 暴露。
 - **"空结果"判定是启发式的**：只对 `read` 级工具生效；包装对象中所有列表字段都为空、且没有嵌套对象时判为 `empty`（ADR-014）；形态不同的返回可能被判为 `ok`。写类工具成功时一律为 `ok`。名称带读动词、实际会写入的工具需要在 `tool_policy.yaml` 中 override。已在官方 `e_commerce_33`、`social_media_4` 与迷你夹具上验证。
-- **风险分级是启发式的**：按工具名动词分级，未知动词默认按 `write` 处理（需要审批）。`workbench gateway export-risk` 导出的表需要人工复核。
+- **风险分级是启发式的**：按工具名动词分级，未知动词默认按 `write` 处理（需要审批）。`workbench gateway export-risk` 导出的表需要人工复核。2026-09-24 对官方数据集的静态扫描：18374 条 POST/PUT/PATCH/DELETE 路由中约 40 条会被判为 `read`（名词 `list`、`view` 被当成读动词，或描述以 "Get" 开头），例如 `DELETE purge_my_list_by_maturity_level`。这些写操作不会要求审批，成功时也可能被标成 `empty`（`docs/verification/2026-09-24-empty-on-writes.md` §4）。
+- **DeepSeek 思考模式与 `reasoning_content`（外部风险）**：DeepSeek 默认开启思考模式，其文档要求带 `tools` 的请求在后续轮次回传 `reasoning_content`，否则返回 400。本仓库的后端不保留 `reasoning_content`，act 节点追加 assistant 消息时也不带它。2026-09-24 实测不回传仍返回 200（`docs/verification/2026-09-24-llm-chain.md` §2 的 P1、P3），因此没有改代码；DeepSeek 一旦按文档执行，智能体会在第一次工具调用之后以 `llm_error` 终止。可能的做法见 `docs/IDEAS.md`，需要仓库主人决定。
+- **官方多工具场景的 token 开销**：act 节点把工具定义同时放进 system prompt 与原生 `tools` 参数。在 39 个工具的官方 `e_commerce_33` 上，每次 act 调用约 26K token，默认 `agent.token_budget=60000` 会在第 3 次 act 之前触发终止。2026-09-24 的单次演示用环境变量把预算设为 400000；默认值是按迷你夹具（7 个工具）设定的，没有修改。
+- **`llm.max_tokens` 含思考 token**：DeepSeek 把思考 token 计入输出 token（探针 P3），默认 2048 可能不够，单次演示设为 8192。
+- **AWM 的输出上限参数对 DeepSeek 不生效**：`awm agent` 与 `awm verify` 发送 `max_completion_tokens`（`awm/core/agent.py:370`、`awm/core/verify.py:309`），DeepSeek 接受但忽略（探针 P4），因此这两个命令对 DeepSeek 没有客户端输出上限。
+- **审计脱敏误伤时间戳**：`src/workbench/gateway/audit.py:17` 的 `PHONE` 正则会把带微秒的 ISO 时间戳（例如 `17:05:31.506430`）中的 `31.506430` 替换成 `[PHONE]`。只影响审计摘要（`result_summary`），trace 与交给模型的工具结果不受影响。Phase 12 只记录，未修改。
 - **每次工具调用新建一个 MCP session**：与 AWM 的做法一致，未做连接池（`docs/IDEAS.md`）。
 - **单进程部署**：审批令牌的"已使用"集合、限流桶、忙碌集合都在进程内存中；多副本部署需要共享存储。
 - **长期记忆的 TTL 精度为秒级**（LangGraph `SqliteStore` 的实现）。
-- **上游缺陷未修复**：veRL fork @001f000 中残留合并冲突标记（RECON §10）；AgentFly 示例脚本使用了 fork 中不存在的 Hydra 键。按 R5 不修改上游，仅在文档中记录，smoke 配置绕开了这些问题。
+- **上游缺陷未修复**：veRL fork @001f000 中残留合并冲突标记（RECON §10）；AgentFly 示例脚本使用了 fork 中不存在的 Hydra 键。`awm agent --scenario` 自动起服在结束时必然抛出 `shutil.SameFileError`（工作库本身就是 `<output_dir>/final.db`，结束时又复制到同一路径：`awm/core/server.py:70-82`、`awm/core/agent.py:596-598`），而且会把服务代码写到 `--envs_path` 所在目录、只终止启动器进程；本仓库的演示改用 `--mcp_url` 模式（`docs/verification/2026-09-24-llm-chain.md` §4）。按 R5 不修改上游，仅在文档中记录，smoke 配置绕开了这些问题。
 - **沙箱的 PID 1 不回收僵尸进程**：compose 中设置了 `init: true`；直接在类似环境中运行时，进程组清理后可能残留僵尸条目（不占资源）。
