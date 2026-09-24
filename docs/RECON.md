@@ -498,3 +498,35 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - **进程组中额外出现的变量**：scikit-learn 1.9.1 在 import 时设置 `KMP_DUPLICATE_LIB_OK`、`KMP_INIT_AT_FORK`（`sklearn/__init__.py:56,60`）。AWM 启动器经 `awm.tools` → mcp-agent 0.2.6 `mcp_agent/workflows/embedding/embedding_base.py:6` import 了它，所以 env server 的子进程带有这两个非密钥变量。
   - **官方数据**：对 revision `dde80a0` 全部 1000 个 `full_code` 做正则扫描，读取的环境变量只有 `PORT`、`HOST`、`DATABASE_PATH`，没有整体访问 `os.environ`（`docs/verification/logs/2026-09-24-phase12.5-subprocess-env.log` §3）。
   - **sympy 1.14.0**（train 锁定版本，只读 wheel，sha256 `e091cc3e…`）：`sympify` 的文档写明它使用 `eval`，不应用于未经清洗的输入（`sympy/core/sympify.py:138-139`；`eval` 在 `sympy/parsing/sympy_parser.py:905`）。
+
+### Phase 12.5 报告之后（2026-09-24）：vLLM `hermes` tool parser（ADR-020，D11）
+
+- **`Snowflake/Arctic-AWM-4B` @ `437dfa0e12702901eb41c30e9326a90996549650`**（HF API 2026-09-24 查询，仍是最新提交）：
+  - `chat_template.jinja`：sha256 `c2bc6549…`，md5 `da05f6b8a81932c7cf5f26eb545d4417`，与模型卡核对记录一致。
+    - 第 1-11 行：带 `tools` 时，system prompt 列出 `<tools></tools>`，并要求输出 `<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>`；
+    - 第 57-75 行：历史中的 `tool_calls` 渲染为 `<tool_call>\n{"name": "…", "arguments": …}\n</tool_call>`；
+    - 第 76-86 行：工具结果以 `<tool_response>` 包裹；
+    - 第 89-94 行：生成提示；`enable_thinking` 为 false 时写入空的 `<think>` 块（第 91-93 行）。
+  - `tokenizer_config.json`（sha256 `443bfa62…`）：`added_tokens_decoder` 中 151657 `<tool_call>`、151658 `</tool_call>`、151665/151666 `<tool_response>`/`</tool_response>`、151667/151668 `<think>`/`</think>` 都是 `special: false`；文件中没有内嵌 chat template。
+- **vLLM v0.19.0**（`2a69949`，稀疏克隆加入了 `vllm/tool_parsers/**`）：
+  - **`vllm/tool_parsers/hermes_tool_parser.py`**：
+    - `Hermes2ProToolParser` 的起止标签与正则在 `:61-66`；
+    - `adjust_request` 只在 `request.tools` 非空且 `tool_choice != "none"` 时设 `skip_special_tokens=False`（`:80-87`）；
+    - 非流式 `extract_tool_calls`：没有 `<tool_call>` 时原样返回 `content`；否则把每段 JSON 的 `name`/`arguments` 转成调用，第一个标签之前的文本作为 `content`（`:89-139`）；
+    - 流式用 `_extract_tool_call_jsons`、`_extract_tool_name`、`_extract_tool_args` 按标签与 `"name"`/`"arguments"` 取值（`:160-208`）；
+    - 该版本不查词表中的标签 id。
+  - **注册与 CLI**：
+    - `vllm/tool_parsers/__init__.py:61-64`：`"hermes"` → `hermes_tool_parser.Hermes2ProToolParser`；
+    - `vllm/tool_parsers/abstract_tool_parser.py:68-73`：基类 `adjust_request` 在请求不带 `tools` 时直接返回；
+    - `vllm/entrypoints/openai/cli_args.py:108-122`：`enable_auto_tool_choice`、`tool_call_parser` 两个前端参数；`:363-364`：只开前者会报错。
+  - **不带 `tools` 的请求**：
+    - `chat_completion/protocol.py:175-181`：`tool_choice` 默认 `"none"`；`:642-643`：只有带 `tools` 且未指定时才改成 `"auto"`；
+    - `serve/render/serving.py:534-550`：`tool_choice == "none"` 时不调用 parser 的 `adjust_request`；
+    - `engine/serving.py:881-950`：`_parse_tool_calls_from_content` 的自动解析分支条件是 parser 已配置、自动选择已开启、`tool_choice` 为 `"auto"` 或 `None`（`:920-924`），不检查 `request.tools`。所以不带 `tools` 却显式传 `tool_choice: null` 的请求**会**被解析，只有保持默认 `"none"` 的请求不受影响；
+    - `chat_completion/serving.py`：
+      - `:1386-1403`：非流式先调用上面的函数；
+      - `:1476-1479`：`tool_choice` 为空或 `"none"` 时消息原样返回 `content`；
+      - `:532-535`、`:559-571`：流式只有 `_should_stream_with_auto_tool_parsing` 为真才创建 parser；
+      - `:1743-1757`：该函数要求 `request.tools` 非空。
+- **AWM `awm agent` 的请求**：`awm/core/agent.py:367-381` 只含 `model`、`messages`、`max_completion_tokens`、`temperature`，vLLM 模式再加 `extra_body`（`add_generation_prompt`、`min_tokens`、`chat_template_kwargs`），不带 `tools`，也不带 `tool_choice`（OpenAI SDK 不发送未给出的参数），非流式。
+- **`docker-compose.yml:54`**：`vllm` 服务的命令写死，不读 serving profile。

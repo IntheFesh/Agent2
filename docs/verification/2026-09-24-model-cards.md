@@ -32,6 +32,7 @@
   `<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>`；工具结果以 `<tool_response>` 包裹；支持 `enable_thinking`。
 - `generation_config.json`：`do_sample`、`temperature`、`top_p`、`top_k` 四项与 `Qwen/Qwen3-4B` 的 `generation_config.json` 逐项相同（2026-09-24 用 curl 读取两者比对）；`tokenizer_config.json` 中 `model_max_length` 为 131072，没有内嵌 chat_template（使用独立的 `chat_template.jinja`）。
 - 对 Phase 15 的含义：本仓库客户端从正文解析 `<tool_call>` 的做法与该模板的输出格式一致；是否启用 vLLM 的 `hermes` parser 仍需在真实服务上确认（UNVERIFIED-LOCAL）。
+- 2026-09-24 补记：仓库主人决定在 serving profile 中启用 `hermes` parser（`user-decisions.md` D11）。依据与源码行号见 ADR-020 与 RECON "Phase 12.5 报告之后"一节，其中同一 revision 的 `chat_template.jinja` 复查后 md5 仍为 `da05f6b8a81932c7cf5f26eb545d4417`；仍待 Phase 15 在 GPU 上验证。
 
 ## "是否就是论文 Table 4 的 AWM 行"
 
