@@ -41,3 +41,12 @@ DB diff: user_content_preferences changed [1]
 - 单元测试：`test_writes_are_never_empty`（`normalize(..., read_only=False)`）、`test_empty_status_only_for_read_tools`（网关按分级传入，读工具的空包装仍为 `empty`，获批的写工具返回同样结构时为 `ok`）。
 - `official_data` 测试：`test_successful_write_with_empty_lists_is_not_empty` 在官方 `social_media_4` 上重放上述调用，断言分级为非 `read`、归一结果为 `ok`，且数据库确实改变。
 - `make test` → 190 passed；`pytest -m official_data` → 5 passed。
+
+## 4. Phase 12 复核（新会话，2026-09-24）
+
+仓库主人在 Phase 12 开始时再次提出同一问题，本节在当前代码（修复 `6abe9b6` 之后）上重新核对，不改代码。命令与输出见 `docs/verification/logs/2026-09-24-phase12-empty-recheck.log`。
+
+- **问题中的例子**：写类工具（如清空购物车）成功返回 `{"cart_items": []}` 时，归一结果为 `ok`，不会被标成 `empty`；只有 `read` 级工具（例如空购物车上的 `list_cart_items`）才会得到 `empty`，含义正是"没有匹配项"。`clear_cart`、`empty_cart`、`reset_cart` 这类名称没有已知动词，按保守默认分为 `write`；`remove_all_cart_items`、`delete_cart` 为 `destructive`。它们都不会得到 `empty`。
+- **对流程的影响**（与 §1 一致）：智能体节点里没有按 `empty` 分支的代码，observe 节点把 `status` 与完整结果一起交给模型；唯一的语义影响来自 act 提示词 "empty means nothing matched"。网关 MCP 前端只对 `error` / `denied` 设 `isError`；指标与审计按 `status` 计数。
+- **剩余的误伤途径：风险分级把写操作判成 `read`**。`empty` 现在只取决于分级，而分级是按工具名的动词启发式（加上描述的第一个词）。对官方数据集的静态扫描：18374 条 POST/PUT/PATCH/DELETE 路由中，只看名称有 38 条被判为 `read`，加上描述首词（近似运行时）为 42 条；其中 18 条的返回模型只含列表与标量，全部列表为空时会被标成 `empty`。已核实的例子：`DELETE purge_my_list_by_maturity_level`、`POST attach_contact_list_to_collector`（名词 `list` 被当作读动词）、`POST record_answer_view`（`view`）、`POST ensure_direct_dm_with_user`（名称无已知动词，但描述以 "Get or create" 开头）。
+- 这些路由的更大问题是**被判为 `read` 后不需要审批**，这不是 ADR-014 本身的问题，而是风险分级启发式的已知限制（LIMITATIONS §6"风险分级是启发式的"，可用 `tool_policy.yaml` 的 overrides 纠正）。静态扫描是正则近似，只用来说明问题存在及其大致规模，不是精确数字。是否修改分级规则（例如结合目录中的 HTTP 方法），留给仓库主人决定。

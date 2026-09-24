@@ -1,0 +1,112 @@
+# 2026-09-24 Phase 12 re-check of the ADR-014 empty rule on writes (owner's question); no LLM involved
+# machine: Claude Code cloud container (Linux x86_64, no GPU); code at HEAD 662790a (after fix 6abe9b6)
+
+## 1. call site: empty only for read-level tools
+277:        norm: NormalizedResult = normalize(tool, is_error, text, gt.input_schema, read_only=risk == "read")
+163:        if read_only and is_empty_payload(text):
+
+## 2. the owner's example and clear-cart style names
+normalize(read_only=True ) on {"cart_items": []} -> empty
+normalize(read_only=False) on {"cart_items": []} -> ok
+normalize(read_only=False) on {"cart_id": 1, "items": [], "total": 0} -> ok
+classify('clear_cart') -> write        (no known verb => unknown_default); a successful call can be labeled empty: False
+classify('empty_cart') -> write        (no known verb => unknown_default); a successful call can be labeled empty: False
+classify('clear_cart_items') -> write        (no known verb => unknown_default); a successful call can be labeled empty: False
+classify('remove_all_cart_items') -> destructive  (verb 'remove' => destructive); a successful call can be labeled empty: False
+classify('delete_cart') -> destructive  (verb 'delete' => destructive); a successful call can be labeled empty: False
+classify('reset_cart') -> write        (no known verb => unknown_default); a successful call can be labeled empty: False
+classify('list_cart_items') -> read         (verb 'list' => read); a successful call can be labeled empty: True
+classify('get_or_create_active_cart') -> write        (verb 'create' => write); a successful call can be labeled empty: False
+
+## 3. who reads the status
+78:        is_error = outcome.status in ("error", "denied")
+42:        metrics.tool_calls.labels(outcome.status, outcome.decision).inc()
+9:- A tool result with status "empty" means nothing matched: it is not an error.
+22:        payload: dict[str, Any] = {"status": outcome.status}
+36:        fingerprint = digest([env_fp, outcome.status, outcome.text])
+# no agent node branches on the status value (grep for '"empty"' in src/workbench/agent/*.py and nodes/*.py: no hits)
+(no hits)
+
+## 4. residual path: write-method routes graded 'read' by the name/description heuristic (static scan of data/awm1k/gen_envs.jsonl)
+# script: scan_write_as_read.py (appendix); 'with summary word' approximates the runtime description's first word
+{
+ "write_method_routes": 18374,
+ "graded_read_by_name": 38,
+ "graded_read_with_summary_word": 42,
+ "graded_read__response_scalars_only": 10,
+ "graded_read__response_has_object": 14,
+ "graded_read__response_lists_and_scalars": 18
+}
+('subscription_management_5', 'DELETE', 'purge_my_list_by_maturity_level', 'scalars_only')
+('social_media_3', 'POST', 'record_answer_view', 'scalars_only')
+('real_time_chat_messaging_1', 'POST', 'ensure_direct_dm_with_user', 'has_object')
+('e_commerce_9', 'POST', 'get_applicable_digital_coupons', 'lists_and_scalars')
+('e_commerce_9', 'POST', 'get_applicable_weekly_ads', 'lists_and_scalars')
+('crm_8', 'POST', 'evaluate_contact_list', 'lists_and_scalars')
+('survey_forms_platform_2', 'POST', 'attach_contact_list_to_collector', 'scalars_only')
+('booking_marketplace_2', 'POST', 'get_trip_price_quote', 'scalars_only')
+
+## 5. verified examples (real summaries from full_code)
+subscription_management_5: DELETE purge_my_list_by_maturity_level | summary='Purge My List by maturity' | name-only: read (verb 'list' => read) | with summary: read (verb 'list' => read)
+social_media_3: POST record_answer_view | summary='Record an answer view' | name-only: read (verb 'view' => read) | with summary: read (verb 'view' => read)
+real_time_chat_messaging_1: POST ensure_direct_dm_with_user | summary='Get or create 1:1 DM by tag' | name-only: write (no known verb => unknown_default) | with summary: read (verb 'get' => read)
+survey_forms_platform_2: POST attach_contact_list_to_collector | summary='Attach a contact list to a collector' | name-only: read (verb 'list' => read) | with summary: read (verb 'list' => read)
+
+## appendix: scan_write_as_read.py
+"""Static scan (no LLM): official write-method routes whose operation_id the policy grades as `read`."""
+import json, re, collections
+from pathlib import Path
+from workbench.gateway.policy import PolicyConfig, classify
+
+policy = PolicyConfig.load(Path("configs/tool_policy.yaml"))
+ROUTE = re.compile(r'@app\.(get|post|put|patch|delete)\((.*?)\)\s*\n\s*(?:async\s+)?def\s+(\w+)', re.S)
+OPID = re.compile(r'operation_id\s*=\s*["\'](\w+)["\']')
+SUMMARY = re.compile(r'summary\s*=\s*["\']([^"\']*)["\']')
+RESP = re.compile(r'response_model\s*=\s*([\w\[\], ]+?)\s*(?:,|$)')
+CLASS = re.compile(r'^class\s+(\w+)\((?:BaseModel|[\w.]+)\):\s*\n((?:[ \t]+.*\n|\s*\n)*)', re.M)
+FIELD = re.compile(r'^[ \t]+(\w+)\s*:\s*([^=\n]+)', re.M)
+
+def model_kind(code: str, name: str) -> str:
+    classes = {m.group(1): m.group(2) for m in CLASS.finditer(code)}
+    if name.startswith(("List[", "list[")):
+        return "list"
+    body = classes.get(name)
+    if body is None:
+        return "unparsed"
+    kinds = []
+    for f, typ in FIELD.findall(body):
+        typ = typ.strip()
+        if typ.startswith(("List[", "list[", "Optional[List[", "Optional[list[")):
+            kinds.append("list")
+        elif typ.split("[")[0] in classes or typ.startswith(("Dict", "dict", "Optional[Dict")) or any(
+                typ.startswith(f"Optional[{c}]") for c in classes):
+            kinds.append("object")
+        else:
+            kinds.append("scalar")
+    if "object" in kinds:
+        return "has_object"
+    return "lists_and_scalars" if "list" in kinds else "scalars_only"
+
+stats = collections.Counter(); examples = []
+for line in open("data/awm1k/gen_envs.jsonl", encoding="utf-8"):
+    env = json.loads(line); code = env["full_code"]
+    for m in ROUTE.finditer(code):
+        method, args, fn = m.group(1), m.group(2), m.group(3)
+        if method == "get":
+            continue
+        op = (OPID.search(args) or [None, fn])[1]
+        stats["write_method_routes"] += 1
+        summ = SUMMARY.search(args)
+        lvl_name = classify(op, "", policy, env["scenario"]).level
+        lvl_desc = classify(op, summ.group(1) if summ else "", policy, env["scenario"]).level
+        if lvl_name == "read":
+            stats["graded_read_by_name"] += 1
+        if lvl_desc == "read":
+            stats["graded_read_with_summary_word"] += 1
+            rm = RESP.search(args)
+            kind = model_kind(code, rm.group(1).strip()) if rm else "no_response_model"
+            stats[f"graded_read__response_{kind}"] += 1
+            if len(examples) < 8:
+                examples.append((env["scenario"], method.upper(), op, kind))
+print(json.dumps(stats, indent=1))
+for e in examples: print(e)
