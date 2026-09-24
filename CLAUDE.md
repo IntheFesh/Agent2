@@ -42,7 +42,7 @@
 - AWM server 以进程组启动，必须用 `killpg` 回收；所有命令设置 `PYTHONPYCACHEPREFIX`，避免在 submodule 中留下 `__pycache__`。
 - 真实 LLM 用 DeepSeek `deepseek-flash`（base URL `https://api.deepseek.com`）；key 只从 `DEEPSEEK_API_KEY` 读取，只在进程环境里映射给 `OPENAI_API_KEY` 等变量。每次外部调用前先估算并记入 `docs/verification/cost-ledger.md`（上界口径）。Phase 12 的三条链路各已执行 1 次，Phase 12.5 追加授权的 1 次 `workbench agent run` 也已执行（提交 `f135189`），均不得重跑（N2）。累计花费（上界口径）¥3.1396。仓库主人在 Phase 13 之后删除这把 key，之后的阶段不再调用 DeepSeek（D12）。
 - Phase 13 已真实执行 1 次合成（`data/synth/p13_it_service_desk`，不入库）：DeepSeek 没有 embedding 端点，用手写的 `local_` 场景经 `--scenario-file` 从 `gen task` 开始（D5、ADR-021）；`gen scenario` 未执行（U9）。手写场景名须以 `local_` 开头、不以 `_<数字>` 结尾（官方也有 `local_` 开头的场景）。
-- vLLM serving profile 已启用 `--enable-auto-tool-choice --tool-call-parser hermes`（D11、ADR-020，UNVERIFIED-LOCAL）；`docker-compose.yml` 的 vllm 命令是写死的，未改。
+- vLLM serving profile 已启用 `--enable-auto-tool-choice --tool-call-parser hermes`（D11、ADR-020，UNVERIFIED-LOCAL）；`docker-compose.yml` 的 vllm 命令已同步（D16），`test_compose_vllm_matches_the_serving_profile` 防止漂移。
 - `awm agent` 只用 `--mcp_url` 模式连接 env-manager 会话：`--scenario` 自动起服结束时必抛 `SameFileError`，还会把服务代码写到 `--envs_path` 目录。
 - 执行生成代码的子进程（env server、`awm env reset_db`、`awm env check_all`）只拿白名单环境变量（`src/workbench/subprocess_env.py`，ADR-019），gen 步骤经本地代理只拿占位 key；新增子进程调用时沿用它，不要传 `dict(os.environ)`。`awm verify` 无法隔离，见 LIMITATIONS §6。
 - 改动 README 或 docs 后运行 `make check-numbers`；改动 registry 后运行 `make results`。

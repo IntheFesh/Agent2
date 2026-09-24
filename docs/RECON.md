@@ -529,7 +529,7 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
       - `:532-535`、`:559-571`：流式只有 `_should_stream_with_auto_tool_parsing` 为真才创建 parser；
       - `:1743-1757`：该函数要求 `request.tools` 非空。
 - **AWM `awm agent` 的请求**：`awm/core/agent.py:367-381` 只含 `model`、`messages`、`max_completion_tokens`、`temperature`，vLLM 模式再加 `extra_body`（`add_generation_prompt`、`min_tokens`、`chat_template_kwargs`），不带 `tools`，也不带 `tool_choice`（OpenAI SDK 不发送未给出的参数），非流式。
-- **`docker-compose.yml:54`**：`vllm` 服务的命令写死，不读 serving profile。
+- **`docker-compose.yml`**：`vllm` 服务的命令写死，不读 serving profile。2026-09-24 按 D16 同步为与 `vllm_command(profile)` 相同的参数（`--host 0.0.0.0` 除外），由单测保证一致。
 
 ### Phase 13（2026-09-24）：合成流水线的入口与外部服务
 
