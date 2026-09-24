@@ -19,7 +19,7 @@ CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run
 已于 2026-09-24 在真实环境验证、不再列为未验证项的：
 
 - **官方数据集下载与接入（原 U7）**：`make data` 匿名下载 revision `dde80a0`，8 个文件齐全，条目数与数据集卡一致；`workbench doctor` 的 dataset 一项为 ok；官方 `e_commerce_33` 经 env-manager 真实启动，`list_tools` 返回 39 个工具。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-dataset.md`，日志 `docs/verification/logs/2026-09-24-phase11.log`。
-- **真实 LLM 驱动的智能体（原 U2）**：`openai_compat` 后端接 DeepSeek（`deepseek-flash`，key 只从环境变量读取），`workbench doctor` 的 llm 一项为 ok；在官方 `e_commerce_33` 任务 0 上执行 1 次 `workbench agent run`，走完"规划 → 读工具 → 审批 → 写工具 → 回答"，DB diff 为 `cart_items` 新增 1 行。单次链路演示，不构成评测。vLLM 后端仍未验证（U1）。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-llm-chain.md`，日志 `docs/verification/logs/2026-09-24-phase12-*.log`。
+- **真实 LLM 驱动的智能体（原 U2）**：`openai_compat` 后端接 DeepSeek（`deepseek-flash`，key 只从环境变量读取），`workbench doctor` 的 llm 一项为 ok；在官方 `e_commerce_33` 任务 0 上执行 1 次 `workbench agent run`，走完"规划 → 读工具 → 审批 → 写工具 → 回答"，DB diff 为 `cart_items` 新增 1 行。单次链路演示，不构成评测。Phase 12.5 的修复完成后，在同一任务上用默认预算再执行了 1 次（提交 `f135189`，WALKTHROUGH §5.3），链路仍然打通。vLLM 后端仍未验证（U1）。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-llm-chain.md`，日志 `docs/verification/logs/2026-09-24-phase12-*.log`。
 - **`awm verify --mode sql` 单次执行（U8 的一半）**：执行官方 verifier 并由 DeepSeek 裁判，写出 `verify.sql.json`；UI 轨迹查看器能渲染这次 `awm agent` 的真实 `trajectory.json`。证据同上。
 
 ## 2. 数字与许可证
