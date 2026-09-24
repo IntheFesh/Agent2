@@ -60,6 +60,29 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 - **`llm.max_tokens` 含思考 token**：DeepSeek 把思考 token 计入输出 token（探针 P3）。Phase 12 实测单次调用的输出最多约 960 token，默认值按其 8 倍改为 8192（ADR-018）；更难的任务可能需要更长的思考。
 - **AWM 的输出上限参数对 DeepSeek 不生效**：`awm agent` 与 `awm verify` 发送 `max_completion_tokens`（`awm/core/agent.py:370`、`awm/core/verify.py:309`），DeepSeek 接受但忽略（探针 P4），因此这两个命令对 DeepSeek 没有客户端输出上限。
 - **审计脱敏是启发式的**：Phase 12 发现 `PHONE` 正则会把带微秒的时间戳（`17:05:31.506430`）和空格分隔的时间戳（`2026-09-23 17:05:16`）的一部分替换成 `[PHONE]`，Phase 12.5 已收紧正则修复（ADR-016）。仍然存在的限制：紧跟在"数字:"之后、或后面紧接":数字"的电话号码不会被脱敏；非 ISO 格式的日期（例如 `24.09.2026`）仍可能被当成电话号码；脱敏只作用于审计摘要，trace 中的工具结果不做脱敏。
+- **执行生成代码的子进程与密钥**：仓库主人在 Phase 12.5 指出，env-manager 用完整的进程环境启动 env server，生成代码能读到 `DEEPSEEK_API_KEY`。Phase 12.5 起改为白名单（ADR-019）：
+  - env server、`awm env reset_db`、`awm env check_all` 只拿到 `PATH`、locale、`TMPDIR` 等运行必需的变量，看不到任何 key；
+  - gen 步骤经本地代理时只拿到占位 key。
+  - 测试会启动真实子进程，并读取真实 AWM 进程组的 `/proc/<pid>/environ`，断言其中没有 `DEEPSEEK_API_KEY` 和任何 `*_API_KEY`（`docs/verification/logs/2026-09-24-phase12.5-subprocess-env.log`）。
+
+  仍然存在的限制：
+  - **`awm verify` 无法隔离**。它在同一进程里做两件事：
+    - 执行 verifier 代码，namespace 中直接提供了 `os`（`awm/core/verify.py:104-126`、`:151-174`）；
+    - 从环境读取 key 调用裁判（`:230-302`、`:419-421`）。
+
+    不改上游就无法把两者分开。`--mode code` 不调用 LLM，可以在不含任何 key 的环境里运行；`--mode sql` 必须带 key。另一种做法是让它只拿到占位 key，见 IDEAS 12，未实现。
+  - **`gen env`、`gen verifier` 的生成代码**与调用 LLM 的步骤在同一进程树里。
+    - 经代理时，生成代码只能看到占位 key 和代理地址。它仍能经代理发起 LLM 调用，费用记入账本。
+    - 不经代理时（只有在 Python 中直接调用才会出现），会看到真实的 `OPENAI_API_KEY`。
+  - **只隔离了环境变量**。子进程与 workbench 以同一用户运行，仍能读取该用户可读的文件，例如 `.env`、`~/.aws/credentials`。要隔离这些文件，需要另一个用户或容器沙箱。
+  - **白名单是固定的**，没有配置开关。
+  - **`awm agent --scenario` 自动起服**时，server 会继承 `awm agent` 的环境，其中含 key（`awm/core/server.py:174-195`）。本仓库只用 `--mcp_url` 模式。
+  - **训练进程不在本次修复范围内**。`workbench train launch` 与 preflight 仍继承完整环境；smoke 训练的 `calculator` 工具用 sympy 的 `sympify` 解析模型输出（`agentfly/tools/src/calculate/tools.py:20`），而 `sympify` 内部使用 `eval`（sympy 1.14.0 `sympy/core/sympify.py:138-139`）。这些都未在 GPU 上验证（U5）。
+  - **Phase 12 的 env server（官方 `e_commerce_33`）是在修复前启动的**，当时进程环境里有 `DEEPSEEK_API_KEY`。离线用正则扫描了官方全部 1000 个场景的代码（上面日志的 §3），结果如下：
+    - 所有场景只按字面名读取 `PORT`、`HOST`、`DATABASE_PATH`，没有整体访问 `os.environ`；
+    - `e_commerce_33` 没有 import 任何网络库。
+
+    正则扫描排除不了动态访问。是否轮换这把 key 由仓库主人决定。
 - **每次工具调用新建一个 MCP session**：与 AWM 的做法一致，未做连接池（`docs/IDEAS.md`）。
 - **单进程部署**：审批令牌的"已使用"集合、限流桶、忙碌集合都在进程内存中；多副本部署需要共享存储。
 - **长期记忆的 TTL 精度为秒级**（LangGraph `SqliteStore` 的实现）。

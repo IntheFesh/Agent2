@@ -483,3 +483,18 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 - DeepSeek 文档（2026-09-24 18:00 UTC 重新读取，思考模式指南中英文版与 16:57 读取时一致）：带 `tools` 的请求须回传此前各轮的 `reasoning_content`（含没有工具调用的轮次），否则返回 400；不带 `tools` 的请求无需回传、传了也被忽略；流式为 `delta.reasoning_content`。API 参考中请求消息的 `reasoning_content` 字段只被描述为 Chat Prefix Completion（Beta）的输入（`https://api-docs.deepseek.com/api/create-chat-completion`），与指南的说法不一致；本仓库按指南实现（ADR-017）。
 - DeepSeek-V4.1-Flash 开源仓库（`huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash` @ `dba1be0`，MIT）：`encoding/encoding.py` 是官方提示词编码脚本，`encode_messages(messages, thinking_mode, reasoning_effort, ...)`；工具定义挂在 system 消息的 `tools` 字段上渲染（`encoding/README.md` "Tool calling"）；带工具时不丢弃历史轮次的思考内容（README "Thinking mode"）。模型原生的工具调用格式是 `<｜DSML｜ calls>` / `<｜DSML｜ invoke>` / `<｜DSML｜ parameter>`（README "V4.1 changes"），这解释了 Phase 12 中 `awm agent` 第 2 轮的输出。用该脚本与 `tokenizer.json` 离线重算 Phase 12 探针的请求，与 DeepSeek 返回的 `prompt_tokens` 完全一致（`docs/verification/logs/2026-09-24-phase12.5-act-tokens.log`）。
 - vLLM v0.19.0（tag commit `2a69949`，本阶段从 GitHub 稀疏克隆只读）：请求带 `tools` 却没有 `tool_choice` 时，校验器把它设为 `"auto"`（`vllm/entrypoints/openai/chat_completion/protocol.py:640-643`）；未配置 tool parser（且非 Mistral / Harmony）时，`"auto"` 在未开启 `--enable-auto-tool-choice` 的情况下返回错误 `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`，其它非 `none` 取值要求 `--tool-call-parser`（`vllm/entrypoints/serve/render/serving.py:197-221`）；否则 `tools` 以 `tool_dicts` 交给 chat template（同文件 `:223-247`）。对照：RECON §10 Phase 4 "没有开启自动工具选择时，模型输出原样作为 content 返回"只适用于不带 `tools` 的请求。
+- 子进程环境（ADR-019，AWM @ `85e322f`）：
+  - **env server 的启动与环境继承**：
+    - `awm.core.server` 先在自己的 `os.environ` 中设置 `PORT` 与 `DATABASE_PATH`（`awm/core/server.py:157-158`），再用 `os.system(f"{sys.executable} {server_code_path} 2>&1 | tee {log_path}")` 启动生成的 server（`:163`）。因此需要 `PATH` 找到 `tee`，解释器用绝对路径。
+    - 生成代码的入口按 `os.environ.get('HOST', '<--host>')`、`os.environ.get('PORT', <--port>)` 取地址（模板在 `:112-116`）。
+  - **`awm env check_all` 与 gen 步骤中执行生成代码的位置**：
+    - 每个环境用 `subprocess.Popen([sys.executable, '-m', 'awm.core.server', ...], start_new_session=True)` 启动，没有传 `env=`，子进程继承 check_all 的环境（`awm/core/env.py:161-172`）。
+    - `gen verifier` 用 `exec(python_code, namespace)` 在进程内测试生成的 verifier（`awm/core/verifier.py:104`）。
+  - **`awm verify`**：
+    - `execute_sql_verifier` / `execute_code_verifier` 在本进程中 `exec` verifier 代码，namespace 中直接提供了 `os`（`awm/core/verify.py:104-126`、`:151-174`）；
+    - sql 模式随后用 `resolve_llm_config()` 从环境取 key 并调用裁判（`:419-421`，`run_llm_judge` 在 `:230-302`，`resolve_llm_config` 在 `awm/tools.py:386-432`）。
+  - **`awm agent --scenario`**：用 `start_server_process` 起服，`Popen` 没有传 `env=`（`awm/core/server.py:174-195`，调用在 `awm/core/agent.py:433-446`）。
+  - **上游自带的隔离**：AWM 自己的 MCP 客户端在连接时用 `isolated_mcp_env()` 临时删掉非白名单变量。它按前缀匹配 `HOME`、`USER`、`PATH`、`LANG`、`TERM`、`SHELL`、`PWD`、`TMPDIR`、`TMP`、`TEMP`，另外保留 `PYTHONPATH`、`VIRTUAL_ENV` 与 conda 变量（`awm/tools.py:118-139`，使用处 `awm/core/agent.py:278`）。它只作用于客户端进程，不作用于 server。
+  - **进程组中额外出现的变量**：scikit-learn 1.9.1 在 import 时设置 `KMP_DUPLICATE_LIB_OK`、`KMP_INIT_AT_FORK`（`sklearn/__init__.py:56,60`）。AWM 启动器经 `awm.tools` → mcp-agent 0.2.6 `mcp_agent/workflows/embedding/embedding_base.py:6` import 了它，所以 env server 的子进程带有这两个非密钥变量。
+  - **官方数据**：对 revision `dde80a0` 全部 1000 个 `full_code` 做正则扫描，读取的环境变量只有 `PORT`、`HOST`、`DATABASE_PATH`，没有整体访问 `os.environ`（`docs/verification/logs/2026-09-24-phase12.5-subprocess-env.log` §3）。
+  - **sympy 1.14.0**（train 锁定版本，只读 wheel，sha256 `e091cc3e…`）：`sympify` 的文档写明它使用 `eval`，不应用于未经清洗的输入（`sympy/core/sympify.py:138-139`；`eval` 在 `sympy/parsing/sympy_parser.py:905`）。
