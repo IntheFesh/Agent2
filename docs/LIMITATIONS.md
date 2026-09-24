@@ -15,7 +15,8 @@
 | U7 | 官方数据集下载与接入 | `scripts/download_data.sh`、`make data`、`workbench env search` 等按官方格式读取 | `huggingface.co` 被拦截 | HF 访问；`make data` 后运行 `workbench doctor`，再用官方场景跑 `workbench env up` |
 | U8 | `awm agent` / `awm verify` 各跑一次单任务 | 集成测试用真实 AWM 代码跑通了建库、server、MCP 调用和 `check_all`；UI 的轨迹查看器能读取 `awm agent` 的输出格式 | 两个命令都需要 LLM 端点，`verify --mode sql` 还需要 LLM key | 一个 LLM 端点；在官方或迷你场景上各执行一次，并显式传 `--temp_server_path`、`--db_path`、`--output_dir` |
 | U9 | 合成流水线真实执行 | `workbench synth run --execute`，含 checkpoint、缓存、账本 | 需要 LLM 与 embedding API key；未在本仓库执行过，账本中的价格是占位值 | API key（见 `.env.example`）；小规模试跑 `--scenarios 1` |
-| U10 | CI 在 GitHub 上运行 | `.github/workflows/ci.yml` | 远端只有一个开发分支，工作流是否已在 GitHub 上运行未确认 | 在 GitHub 上查看 Actions 运行记录 |
+
+CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run 9，提交 `bbb541c`），因此不列为未验证项。此前 run 4–8 失败，原因分别是 detect-secrets 误报和 loguru 在 CI 中强制彩色输出，均已修复。
 
 ## 2. 数字与许可证
 
