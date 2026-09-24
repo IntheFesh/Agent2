@@ -530,3 +530,30 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
       - `:1743-1757`：该函数要求 `request.tools` 非空。
 - **AWM `awm agent` 的请求**：`awm/core/agent.py:367-381` 只含 `model`、`messages`、`max_completion_tokens`、`temperature`，vLLM 模式再加 `extra_body`（`add_generation_prompt`、`min_tokens`、`chat_template_kwargs`），不带 `tools`，也不带 `tool_choice`（OpenAI SDK 不发送未给出的参数），非流式。
 - **`docker-compose.yml:54`**：`vllm` 服务的命令写死，不读 serving profile。
+
+### Phase 13（2026-09-24）：合成流水线的入口与外部服务
+
+- **`gen scenario` 依赖 embedding**（AWM @ `85e322f`，`awm/core/scenario.py`）：
+  - 去重用 `text-embedding-3-large` 计算相似度，阈值等配置在 `:40-43`；
+  - `EMBEDDING_OPENAI_API_KEY` 用断言强制要求（`:63`），随后创建 embedding 客户端（`:83-86`）。
+- **`gen task` 以场景文件为输入**（`awm/core/task.py`）：
+  - 配置：`input` 的注释是 "scenario description file"（`:13`），`num_tasks=10`、`shuffle=True`、`limit=None`、`max_retry=4`（`:15-19`）；
+  - 检查：文件必须存在（`:24`），必须设置 `AWM_SYN_OVERRIDE_MODEL`（`:26-29`）；
+  - 请求：每个场景 1 个，`temperature` 1.0、`max_tokens` 32000（`:35-56`）；只用 `name` 与 `description`（`:44-45`）；
+  - 重试：任务数不足或解析失败时，整步最多重试 4 次（`:66-111`）；
+  - 输入输出：加载输入、打乱、截断到 `limit`（`:126-129`）；每个场景输出 `{"scenario", "tasks"}`（`:94-97`）。
+  - `python -m awm.cli gen task --help` 中 `--input` 标为必填。
+- **官方 `data/awm1k/gen_scenario.jsonl`**（revision `dde80a0`）：1000 条，每条恰好是 `{"name": str, "description": str}`；description 长度 61–211 词，中位数 162。
+- **AWM 的 LLM 客户端**（`awm/gpt.py`）：
+  - 非流式调用 `chat.completions.create`（`:171`），把 `max_tokens` 改名为 `max_completion_tokens`（`:160-164`）；DeepSeek 接受但忽略这个参数（Phase 12 探针 P4）。
+  - 超时 600 s，每个请求最多尝试 3 次（`:36`、`:168-204`）。
+- **各 gen 步骤的请求上限与整步重试**：都是每次尝试一批请求，最多 5 次尝试（`max_retry=4`）。失败后先用一次"错误摘要"请求总结错误，再把摘要带进下一次尝试。
+  - `gen db`：主请求 `max_tokens` 128000（`awm/core/db.py:153-154`）；错误摘要 10000（`summarize_errors`，`:28-52`）；
+  - `gen sample`：主请求 128000（`awm/core/sample.py:156-157`）；错误摘要 8000（`:34-58`）；
+  - `gen spec`：128000（`awm/core/spec.py:56-57`）；
+  - `gen env`：主请求 128000（`awm/core/env.py:408-409`）；错误摘要 16000（`:71-102`）；
+  - `gen verifier`：每个任务 32000（`awm/core/verifier.py:200-201`）；错误摘要 1024（`:205-226`）。
+- **DeepSeek**（2026-09-24 20:43 UTC 查阅，均为官方来源）：
+  - `GET /models` 返回 `deepseek-flash`、`deepseek-v4-pro`；
+  - 文档站点 `sitemap.xml` 中的 API 页面为 create-chat-completion、create-completion、create-response、create-file、list-files、retrieve-file、delete-file、get-user-balance、list-models，没有 embeddings；
+  - 价格页与 16:55 UTC 读取时相同（见 `configs/pricing.yaml` 与 `docs/verification/cost-ledger.md` §1）。
