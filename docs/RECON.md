@@ -480,3 +480,4 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 - fastapi-mcp 0.4.0：工具名取 OpenAPI 的 operationId，没有 operationId 的操作被跳过（`fastapi_mcp/openapi/convert.py:50-63`，工具构造在 `:263`）。
 - AWM 服务端按场景名建立字典，同名场景取最后一条记录（`third_party/agent-world-model/awm/core/server.py:98-99`）。
 - 官方数据集 revision `dde80a0` 的 `gen_envs.jsonl`：1000 个场景全部能被 `ast` 解析；35062 个路由全部写成 `@app.<method>(..., operation_id="...")` 且为字面量；按方法统计 GET 16688、POST 13819、PATCH 3605、DELETE 574、PUT 376（`docs/verification/logs/2026-09-24-phase12.5-risk-floor.log`）。
+- DeepSeek 文档（2026-09-24 18:00 UTC 重新读取，思考模式指南中英文版与 16:57 读取时一致）：带 `tools` 的请求须回传此前各轮的 `reasoning_content`（含没有工具调用的轮次），否则返回 400；不带 `tools` 的请求无需回传、传了也被忽略；流式为 `delta.reasoning_content`。API 参考中请求消息的 `reasoning_content` 字段只被描述为 Chat Prefix Completion（Beta）的输入（`https://api-docs.deepseek.com/api/create-chat-completion`），与指南的说法不一致；本仓库按指南实现（ADR-017）。

@@ -8,6 +8,6 @@
 6. **把 AWM 的 `trajectory.json` 转换成本仓库 trace 格式的离线导入器**，这样 UI 能对比同一任务的两种轨迹。
 7. **应用层机制的独立实验设计**（见 ADR-013）：如果将来要回答"网关、审批或守卫是否影响任务完成"，需要在独立仓库里做：固定模型与权重、固定任务集、足够样本、预注册指标、在官方 harness 之外单独报告。本仓库不做。
 8. **去掉 act 调用中重复的工具定义**：工具定义目前同时出现在 system prompt（`tools_block`）和原生 `tools` 参数中；在 39 个工具的官方 `e_commerce_33` 上，每次 act 调用约 26K token（Phase 12 实测，`docs/verification/2026-09-24-llm-chain.md` §3.1）。可以只保留一处，例如只发原生 `tools`，system prompt 里只列工具名与风险级别。需要改 prompt（提升版本号并记入 CHANGELOG）和 act 节点，并在 mock 与真实端点上重新验证。
-9. **DeepSeek 思考模式的 `reasoning_content` 回传**：(a) 在 `LLMSettings` 增加 `extra_body` 配置，用 `{"thinking": {"type": "disabled"}}` 选择非思考模式，只涉及 LLM 层与配置；(b) 让 `ChatResult` 携带 `reasoning_content`，由 act 节点写回 assistant 消息，这会改动智能体状态，超出 TASK_v2 Phase 12 第 4 条允许的范围。两者都需要补单测和 ADR。
+9. ~~**DeepSeek 思考模式的 `reasoning_content` 回传**~~：Phase 12.5 在 LLM 层实现（ADR-017）；按仓库主人的决定不加 `extra_body` 开关，也不改智能体状态。
 10. **trace 中记录输入 / 输出 token 的拆分**：`llm` 事件目前只有合计值，花费账本只能把全部 token 按输出单价计。记录 `prompt_tokens`、`completion_tokens` 以及服务商返回的缓存命中字段，账本可以更准确。
 11. ~~**风险分级结合 HTTP 方法**~~：已在 Phase 12.5 实现（ADR-015）。
