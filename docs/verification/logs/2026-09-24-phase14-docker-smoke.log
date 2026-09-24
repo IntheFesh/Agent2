@@ -1,7 +1,8 @@
 # 2026-09-24 Phase 14: Docker build and compose start (U6; owner decision D15). Engineering facts only.
 # Excerpts, verbatim, from (1) the local dockerd attempt in the Claude Code cloud container and (2) two runs of
 # the GitHub Actions job docker-smoke (.github/workflows/docker-smoke.yml -> python3 scripts/docker_smoke.py).
-# Lines about credentials (which GitHub masks) are left out; nothing else was edited.
+# Lines about credentials (which GitHub masks) are left out. The only other edit: the submodule checkout lines
+# carry a `pragma: allowlist secret` comment for the secret scanner (they hold public git SHAs).
 
 ## 1. local attempt: dockerd in the Claude Code cloud container (log excerpt)
 time="2026-09-24T21:45:56.133913958Z" level=info msg="Docker daemon" commit=f78c987 containerd-snapshotter=true storage-driver=overlayfs version=29.3.1
@@ -17,8 +18,8 @@ time="2026-09-24T21:46:05.445332568Z" level=error msg="Handler for POST /v1.54/i
 2026-09-24T21:52:48.0031188Z 24.04.5
 2026-09-24T21:52:48.0032561Z Image: ubuntu-24.04
 2026-09-24T21:52:48.0032976Z Version: 20260920.314.1
-2026-09-24T21:52:51.0510903Z Submodule path 'third_party/AgentFly': checked out '1256586b1109ba8e0dc0f179f8515b4567d09df4'
-2026-09-24T21:52:51.0650830Z Submodule path 'third_party/agent-world-model': checked out '85e322f69279e3b3325b7377ec3bab788514e9cb'
+2026-09-24T21:52:51.0510903Z Submodule path 'third_party/AgentFly': checked out '1256586b1109ba8e0dc0f179f8515b4567d09df4'  # pragma: allowlist secret
+2026-09-24T21:52:51.0650830Z Submodule path 'third_party/agent-world-model': checked out '85e322f69279e3b3325b7377ec3bab788514e9cb'  # pragma: allowlist secret
 2026-09-24T21:52:51.1874786Z 5419a2c6fec64c4d79ee844f606a4fdd93921cb1
 2026-09-24T21:52:51.2031526Z ##[group]Run python3 scripts/docker_smoke.py
 2026-09-24T21:52:51.2696631Z $ docker version --format {{.Server.Version}}
@@ -83,8 +84,8 @@ time="2026-09-24T21:46:05.445332568Z" level=error msg="Handler for POST /v1.54/i
 2026-09-24T22:26:39.2518763Z 24.04.5
 2026-09-24T22:26:39.2520825Z Image: ubuntu-24.04
 2026-09-24T22:26:39.2521414Z Version: 20260920.314.1
-2026-09-24T22:26:41.9664501Z Submodule path 'third_party/AgentFly': checked out '1256586b1109ba8e0dc0f179f8515b4567d09df4'
-2026-09-24T22:26:41.9850279Z Submodule path 'third_party/agent-world-model': checked out '85e322f69279e3b3325b7377ec3bab788514e9cb'
+2026-09-24T22:26:41.9664501Z Submodule path 'third_party/AgentFly': checked out '1256586b1109ba8e0dc0f179f8515b4567d09df4'  # pragma: allowlist secret
+2026-09-24T22:26:41.9850279Z Submodule path 'third_party/agent-world-model': checked out '85e322f69279e3b3325b7377ec3bab788514e9cb'  # pragma: allowlist secret
 2026-09-24T22:26:42.1164782Z c2a8a0858dcbcc142b00cc1577185326ee44bd7e
 2026-09-24T22:26:42.1367389Z ##[group]Run python3 scripts/docker_smoke.py
 2026-09-24T22:26:42.2156533Z $ docker version --format {{.Server.Version}}
