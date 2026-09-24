@@ -403,3 +403,13 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - `--enable-auto-tool-choice` 必须配合 `--tool-call-parser` 使用（`vllm/entrypoints/openai/cli_args.py:364`）；
   - 没有开启自动工具选择时，模型输出原样作为 `content` 返回（`vllm/entrypoints/openai/chat_completion/serving.py:1399-1403`）。
 - Arctic-AWM 模型卡仍然读不到。因此 serving 配置沿用 AWM README 中的最简命令（`README.md:210`），不设 parser 和 chat template。客户端会从 `content` 中解析 `<tool_call>`，格式与 `awm/core/agent.py:130-167` 相同。
+
+### Phase 5
+
+- LangGraph 1.2.12：
+  - `interrupt(value)`（`langgraph/types.py:880-887`）与 `Command`（`langgraph/types.py:827`）；
+  - `AsyncSqliteSaver`（`langgraph/checkpoint/sqlite/aio.py:38`，`from_conn_string` 在 `:133`）；
+  - `SqliteStore(conn, ttl=TTLConfig)`（`langgraph/store/sqlite/base.py:855-864`，`supports_ttl=True` 在 `:853`，`sweep_ttl` 在 `:1129`）；
+  - `TTLConfig.default_ttl` 的单位是分钟（`langgraph/store/base/__init__.py:545`）。
+- 实测：`sweep_ttl` 把带微秒的 `expires_at` 与只到秒的 `CURRENT_TIMESTAMP` 按字符串比较（`base.py:1139`），因此过期要到下一秒才会被清扫。
+- 实测：LangGraph 在恢复被 `interrupt` 暂停的节点时，会从头重新执行该节点。所以 approve 节点在 `interrupt` 之前不做任何有副作用的事，"请求审批"事件改在 act 节点里发出。
