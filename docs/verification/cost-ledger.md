@@ -1,0 +1,31 @@
+# 外部 API 花费账本（TASK_v2 N3）
+
+- 上限：**¥30**；累计超过 **¥15** 时在阶段报告中提示一次（`user-decisions.md` D4）。
+- 服务：DeepSeek，OpenAI 格式端点 `https://api.deepseek.com`，模型 `deepseek-flash`（服务端模型版本 DeepSeek-V4.1-Flash，`GET /models` 返回的 `name`）。
+- 密钥：只从进程环境变量 `DEEPSEEK_API_KEY` 读取，不写入任何文件、日志或提交（D2）。
+
+## 1. 单价来源
+
+DeepSeek 官方价格页 `https://api-docs.deepseek.com/zh-cn/quick_start/pricing/`，2026-09-24 16:55 UTC 用 curl 读取。原文摘录（`deepseek-flash` 一列）：
+
+> 百万tokens输入 （缓存命中） 空闲时段 0.02元 … 高峰时段 0.04元 …
+> 百万tokens输入 （缓存未命中） 空闲时段 1元 … 高峰时段 2元 …
+> 百万tokens输出 空闲时段 4元 … 高峰时段 8元 …
+> (2) 空闲时段价格为高峰时段价格的一半。北京时间周一至周五（不含中国法定节假日）9:00 - 12:00、14:00 - 18:00 为高峰时段
+
+## 2. 记账口径
+
+- **一律按高峰价、且把全部输入 token 按"缓存未命中"计**：输入 ¥2 / 百万 tokens，输出 ¥8 / 百万 tokens。这是上界：本轮调用实际都发生在空闲时段（UTC 17 点前后，即北京时间次日凌晨），而且有缓存命中，实际扣费更低。
+- 输入与输出没有分开记录时，全部按输出单价 ¥8 / 百万计（更宽的上界）。
+- 输出 token 含思考 token：DeepSeek 返回的 `completion_tokens` 包含 `completion_tokens_details.reasoning_tokens`（探针 P3 实测 184 个输出 token 中 123 个是思考 token）。
+- token 数的来源：本仓库后端的调用取 DeepSeek 返回的 `usage`；上游 `awm agent` / `awm verify` 不记录 usage，改用上界估算（见各行说明）。
+- 金额保留 4 位小数。
+- 交叉核对：每组调用前后读取 `GET /user/balance`（账户余额以 USD 计，只精确到美分），只记录差值，不记录余额本身。
+
+## 3. 明细
+
+| # | 时间（UTC） | 调用 | 请求数 | 输入 tokens | 输出 tokens | 调用前估算 | 记账金额（上界口径） | 余额差 | 累计（上界口径） |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 2026-09-24 16:58 | `workbench doctor`（`GET /models`）、`GET /user/balance` | — | 0 | 0 | ¥0 | ¥0 | — | ¥0 |
+| 1 | 2026-09-24 17:01–17:02 | 协议探针 P1–P3（`2026-09-24-llm-chain.md` §2） | 6 | 28,023 | 353 | < ¥0.1 | ¥0.0589 | 0（不足 1 美分） | ¥0.0589 |
+| 2 | 2026-09-24 17:05 | `workbench agent run`（`e_commerce_33` 任务 0，N2 单次） | 6 | 合计 121,954（CLI 只记录每次调用的输入输出合计） | （含在左栏） | 约 ¥0.4；上界约 ¥1.1（plan 约 12.5K、每次 act 约 26K 输入 token；总量受 `token_budget=400000` 约束） | ¥0.9756（全部按输出单价计） | 0（不足 1 美分） | ¥1.0345 |

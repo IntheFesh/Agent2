@@ -1,0 +1,167 @@
+# 2026-09-24 Phase 12 step 1: pre-checks, workbench doctor, DeepSeek protocol probe
+# machine: Claude Code cloud container (Linux x86_64, no GPU); egress via proxy. Key read from env only, never printed.
+
+## pre-check 1: key presence
+$ [ -n "${DEEPSEEK_API_KEY:-}" ] && echo present
+DEEPSEEK_API_KEY: present (non-empty)
+
+## pre-check 2: reachability (no auth header) at 2026-09-24T16:54:56Z
+$ curl -sS -o /dev/null -w "%{http_code}" https://api.deepseek.com/
+GET https://api.deepseek.com/ -> HTTP 401 (connect 0.000511s, total 0.656546s)
+GET https://api.deepseek.com/models (no key) -> HTTP 401
+
+## workbench doctor (backend configured by process env only; no .env file)
+$ WORKBENCH_LLM__BACKEND=openai_compat WORKBENCH_LLM__BASE_URL=https://api.deepseek.com \
+  WORKBENCH_LLM__MODEL=deepseek-flash WORKBENCH_LLM__API_KEY_ENV=DEEPSEEK_API_KEY uv run workbench doctor
+# run at 2026-09-24T17:04:22Z
+                                                workbench doctor                                                
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ check                       ┃ status ┃ detail                                                                ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ python                      │ ok     │ 3.12 (AWM and AgentFly require 3.12)                                  │
+│ submodule:agent-world-model │ ok     │ pinned at 85e322f69279                                                │
+│ submodule:AgentFly          │ ok     │ pinned at 1256586b1109                                                │
+│ dataset                     │ ok     │ data/awm1k present                                                    │
+│ ports                       │ ok     │ env pool 18100-18199: 0 busy                                          │
+│ gpu                         │ warn   │ no nvidia-smi: GPU steps are UNVERIFIED-LOCAL (mock mode still works) │
+│ env-vars                    │ ok     │ backend=openai_compat                                                 │
+│ llm                         │ ok     │ https://api.deepseek.com/models reachable                             │
+└─────────────────────────────┴────────┴───────────────────────────────────────────────────────────────────────┘
+exit=0
+
+## GET /models (free; with key)
+{"id": "deepseek-flash", "name": "DeepSeek-V4.1-Flash", "context_window": 1048576, "max_output_tokens": 393216, "effort": {"supported_levels": ["low", "high", "max"], "default_level": "high"}}
+{"id": "deepseek-v4-pro", "name": "DeepSeek-V4-Pro", "context_window": 1048576, "max_output_tokens": 393216, "effort": {"supported_levels": ["low", "high", "max"], "default_level": "high"}}
+
+## protocol probe P1/P2 via workbench OpenAICompatBackend (stream=True), script: scratchpad probe.py
+# P1: DeepSeek default (thinking enabled), tiny tool; req2 omits reasoning_content like the act node does
+# P2: extra_body {"thinking": {"type": "disabled"}}, the 39 real e_commerce_33 tool schemas (native tools payload)
+start 2026-09-24T17:01:46Z
+P1 thinking=default req1: 1.1s finish=tool_calls tool_calls=[('get_utc_time', {})] content='' usage=Usage(prompt_tokens=286, completion_tokens=25)
+P1 thinking=default req2: 1.2s finish=stop tool_calls=[] content='The current UTC time is **2026-09-24 17:05:00 UTC** (5:05 PM on September 24, 2026).' usage=Usage(prompt_tokens=347, completion_tokens=43)
+P2 thinking=disabled req1: 1.4s finish=tool_calls tool_calls=[('e_commerce_33__list_product_categories', {})] content="I'll retrieve the top-level product categories for you." usage=Usage(prompt_tokens=13248, completion_tokens=39)
+P2 thinking=disabled req2: 1.6s finish=stop tool_calls=[] content="There is **1** top-level product category:\n\n| ID | Name |\n|----|------|\n| 1 | Electronics |\n\nNote: this returned only categories with no parent (top-level). If you'd like, I can also list the subcateg" usage=Usage(prompt_tokens=13326, completion_tokens=54)
+usage [{"probe": "P1 thinking=default", "req": 1, "prompt": 286, "completion": 25}, {"probe": "P1 thinking=default", "req": 2, "prompt": 347, "completion": 43}, {"probe": "P2 thinking=disabled", "req": 1, "prompt": 13248, "completion": 39}, {"probe": "P2 thinking=disabled", "req": 2, "prompt": 13326, "completion": 54}]
+end 2026-09-24T17:01:51Z
+
+## protocol probe P3 via raw HTTP streaming, thinking explicitly enabled; req2 omits reasoning_content
+start 2026-09-24T17:02:15Z
+req1: {'http_status': 200, 'reasoning_chars': 425, 'reasoning': 'We need answer compute. Need follow instruction: step by step, then call record_answer. We can reason here.\n\n17*23 = 391? 17*20=340, 17*3=51, sum 391. 19*21=399', 'content': '17 × 23 = 391  \n19 × 21 = 399  \n391 + 399 = 790', 'tool_calls': [{'id': 'call_00_cUw4HMagLaNDt0tnBhOM8958', 'name': 'record_answer', 'arguments': '{"value": 790}'}], 'usage': {'prompt_tokens': 309, 'completion_tokens': 184, 'total_tokens': 493, 'prompt_tokens_details': {'cached_tokens': 0}, 'completion_tokens_details': {'reasoning_tokens': 123}, 'prompt_cache_hit_tokens': 0, 'prompt_cache_miss_tokens': 309}, 'finish': 'tool_calls'}
+req2 (reasoning_content omitted): {'http_status': 200, 'reasoning_chars': 26, 'reasoning': 'Need final maybe say done.', 'content': '790', 'tool_calls': [], 'usage': {'prompt_tokens': 507, 'completion_tokens': 8, 'total_tokens': 515, 'prompt_tokens_details': {'cached_tokens': 256}, 'completion_tokens_details': {'reasoning_tokens': 6}, 'prompt_cache_hit_tokens': 256, 'prompt_cache_miss_tokens': 251}, 'finish': 'stop'}
+end 2026-09-24T17:02:18Z
+
+## balance cross-check (USD, delta only): before probes -> 20 s after probes: 0.00
+
+## appendix: probe scripts (verbatim; the key is read from the environment by name)
+### probe.py (P1, P2)
+"""Protocol probe of DeepSeek through workbench's OpenAICompatBackend (streaming, as the agent uses it).
+
+P1: default thinking mode + tools; the 2nd request omits reasoning_content (as the agent does) -> expect HTTP 400.
+P2: thinking disabled via extra_body; real e_commerce_33 tool schemas; 2-turn tool exchange -> expect success.
+The API key is read from DEEPSEEK_API_KEY by the backend and never printed.
+"""
+import asyncio, json, os, time
+from pathlib import Path
+from workbench.llm.backends.openai_compat import OpenAICompatBackend
+from workbench.llm.errors import LLMError
+
+S = Path("<scratchpad>/p12")
+BASE, MODEL = "https://api.deepseek.com", "deepseek-flash"
+TINY = [{"name": "get_utc_time", "description": "Return the current UTC time.", "input_schema": {"type": "object", "properties": {}}}]
+usage: list[dict] = []
+
+def backend(extra: dict | None) -> OpenAICompatBackend:
+    return OpenAICompatBackend(name="openai_compat", base_url=BASE, model=MODEL, api_key=os.environ["DEEPSEEK_API_KEY"],
+                               connect_timeout_s=10, read_timeout_s=120, stream=True, extra_body=extra)
+
+def e33_tools() -> list[dict]:
+    native = json.loads((S / "e33_native_tools.json").read_text())
+    return [{"name": t["function"]["name"], "description": t["function"]["description"],
+             "input_schema": t["function"]["parameters"]} for t in native]
+
+async def two_turns(label: str, extra: dict | None, tools: list[dict], question: str, fake_result: str) -> None:
+    b = backend(extra)
+    try:
+        msgs = [{"role": "user", "content": question}]
+        t0 = time.perf_counter()
+        r1 = await b.chat(msgs, tools, temperature=0.6, max_tokens=2048)
+        usage.append({"probe": label, "req": 1, "prompt": r1.usage.prompt_tokens, "completion": r1.usage.completion_tokens})
+        print(f"{label} req1: {time.perf_counter()-t0:.1f}s finish={r1.finish_reason} tool_calls={[(c.name, c.arguments) for c in r1.tool_calls]} "
+              f"content={r1.content[:120]!r} usage={r1.usage}")
+        if not r1.tool_calls:
+            print(f"{label}: no tool call, stop"); return
+        tc = r1.tool_calls[0]
+        msgs += [{"role": "assistant", "content": r1.content,
+                  "tool_calls": [{"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)}}]},
+                 {"role": "tool", "tool_call_id": tc.id, "content": fake_result}]
+        t0 = time.perf_counter()
+        try:
+            r2 = await b.chat(msgs, tools, temperature=0.6, max_tokens=2048)
+            usage.append({"probe": label, "req": 2, "prompt": r2.usage.prompt_tokens, "completion": r2.usage.completion_tokens})
+            print(f"{label} req2: {time.perf_counter()-t0:.1f}s finish={r2.finish_reason} tool_calls={[(c.name, c.arguments) for c in r2.tool_calls]} "
+                  f"content={r2.content[:200]!r} usage={r2.usage}")
+        except LLMError as exc:
+            print(f"{label} req2: {type(exc).__name__}: {exc}")
+    finally:
+        await b.aclose()
+
+async def main() -> None:
+    print("start", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    await two_turns("P1 thinking=default", None, TINY, "What is the current UTC time? Use the tool.",
+                    json.dumps({"status": "ok", "result": "2026-09-24T17:05:00Z"}))
+    await two_turns("P2 thinking=disabled", {"thinking": {"type": "disabled"}}, e33_tools(),
+                    "Which top-level product categories exist? Use a tool.",
+                    json.dumps({"status": "ok", "result": {"categories": [{"id": 1, "name": "Electronics"}]}}))
+    print("usage", json.dumps(usage))
+    print("end", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+
+asyncio.run(main())
+
+### probe3.py (P3)
+"""P3: explicit thinking mode, raw HTTP streaming; capture reasoning_content; then omit it in request 2."""
+import json, os, time
+import httpx
+
+URL = "https://api.deepseek.com/chat/completions"
+H = {"Authorization": f"Bearer {os.environ['DEEPSEEK_API_KEY']}"}
+TOOLS = [{"type": "function", "function": {"name": "record_answer", "description": "Record the final numeric answer.",
+          "parameters": {"type": "object", "properties": {"value": {"type": "number"}}, "required": ["value"]}}}]
+usage = []
+
+def stream(messages):
+    body = {"model": "deepseek-flash", "messages": messages, "tools": TOOLS, "stream": True,
+            "stream_options": {"include_usage": True}, "max_tokens": 2048, "thinking": {"type": "enabled"}}
+    reasoning, content, calls, u, finish = [], [], {}, None, None
+    with httpx.stream("POST", URL, json=body, headers=H, timeout=120) as r:
+        if r.status_code >= 400:
+            return {"http_status": r.status_code, "error_body": r.read().decode()[:600]}
+        for line in r.iter_lines():
+            if not line.startswith("data:"): continue
+            data = line[5:].strip()
+            if data == "[DONE]": break
+            ch = json.loads(data)
+            if ch.get("usage"): u = ch["usage"]
+            for c in ch.get("choices") or []:
+                d = c.get("delta") or {}
+                if d.get("reasoning_content"): reasoning.append(d["reasoning_content"])
+                if d.get("content"): content.append(d["content"])
+                for tc in d.get("tool_calls") or []:
+                    s = calls.setdefault(tc.get("index", 0), {"id": None, "name": "", "arguments": ""})
+                    s["id"] = tc.get("id") or s["id"]; fn = tc.get("function") or {}
+                    s["name"] += fn.get("name") or ""; s["arguments"] += fn.get("arguments") or ""
+                finish = c.get("finish_reason") or finish
+    return {"http_status": 200, "reasoning_chars": len("".join(reasoning)), "reasoning": "".join(reasoning),
+            "content": "".join(content), "tool_calls": list(calls.values()), "usage": u, "finish": finish}
+
+print("start", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+msgs = [{"role": "user", "content": "Compute 17*23 + 19*21 step by step, then call record_answer with the result."}]
+r1 = stream(msgs)
+print("req1:", {k: (v if k != "reasoning" else v[:160]) for k, v in r1.items()})
+if r1.get("tool_calls"):
+    tc = r1["tool_calls"][0]
+    base = [*msgs, {"role": "assistant", "content": r1["content"],
+                    "tool_calls": [{"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}]},
+            {"role": "tool", "tool_call_id": tc["id"], "content": "recorded"}]
+    r2 = stream(base)  # reasoning_content omitted, like workbench's act node
+    print("req2 (reasoning_content omitted):", {k: (v if k != "reasoning" else v[:160]) for k, v in r2.items()})
+print("end", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
