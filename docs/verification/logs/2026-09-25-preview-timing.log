@@ -1,0 +1,32 @@
+# 2026-09-25 Phase 17: approval-preview timings (engineering numbers, not a model metric; ADR-029)
+# measured with scripts/measure_preview.py in the development container; stdout of each run, verbatim
+
+$ scripts/measure_preview.py
+machine: Linux-6.18.44-fc-v37-x86_64-with-glibc2.39, 4 CPUs, Python 3.12.3
+dataset: tests/fixtures/awm_mini  scenario: mini_e_commerce
+tool: add_item_to_cart {"product_offer_id": 11, "quantity": 1}
+session env start: 5253 ms
+previews: 10 ok, 0 failed
+stage       min  median    max   (ms)
+prepare       2       2      4
+start      3518    3555   3661
+call         84      87    131
+diff          2       2      2
+reclaim      16      16     17
+total      3626    3678   3806
+suggested approval.preview_timeout_s: 20 (5 x the slowest total)
+
+$ scripts/measure_preview.py --dataset-dir data/awm1k --scenario e_commerce_33 --args {"product_offer_id": 1, "quantity": 1}
+machine: Linux-6.18.44-fc-v37-x86_64-with-glibc2.39, 4 CPUs, Python 3.12.3
+dataset: data/awm1k  scenario: e_commerce_33
+tool: add_item_to_cart {"product_offer_id": 1, "quantity": 1}
+session env start: 6498 ms
+previews: 10 ok, 0 failed
+stage       min  median    max   (ms)
+prepare       3       4      6
+start      3722    4169   5825
+call         91     100    180
+diff          7       7     10
+reclaim      16      33     33
+total      3946    4316   5977
+suggested approval.preview_timeout_s: 30 (5 x the slowest total)
