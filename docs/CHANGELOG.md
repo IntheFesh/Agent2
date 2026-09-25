@@ -21,7 +21,7 @@
 
 | 阶段 | 变更 | 主要提交 |
 |---|---|---|
-| Phase 9 | 网络、CI 与分支的前置检查；保存 `TASK_v2.md` | `80f8ece` |
+| Phase 9 | 网络、CI 与分支的前置检查；保存 `TASK_v2.md`（2026-09-25 移至 `docs/process/`） | `80f8ece` |
 | Phase 10 | registry 30 条对照 arXiv v3 Table 4 逐格核对，按整行录入 Base 与 AWM 两行；核实数据集与模型许可证，加入 CC-BY-4.0 署名；起草 AWM 许可证 issue | `9c10582`、`3059c35` |
 | Phase 11 | 下载并接入官方数据集（revision `dde80a0`）；迷你夹具与官方 `e_commerce_33` 的接口对账；`official_data` 集成测试；按官方数据修正"空结果"判定，成功的写操作不再判为 empty（ADR-014） | `50a455d`、`d0d47a7`、`b6d0a8c`、`6abe9b6` |
 | Phase 12 | 用 DeepSeek 做单次链路演示：`workbench agent run`、`awm agent`、`awm verify --mode sql` 各 1 次（N2），逐条记账 | `47abb28`、`662790a` |
@@ -29,6 +29,6 @@
 | Phase 13 | serving profile 启用 `hermes` tool parser（D11，ADR-020）；`synth run` 可从 `gen task` 开始（ADR-021）；按官方价格页定价；执行 1 次真实合成（断点续跑、缓存、账本、`check_all`） | `4c88de8`、`b385891`、`02832e5`、`0e1824a` |
 | Phase 14 | compose 的 vllm 参数与 profile 同步（D16）；GitHub Actions 的 `docker-smoke` 任务（原 U6 已验证）；中断时回收步骤的整棵进程树（ADR-022）；合成预算熔断（ADR-023）；Docker 镜像不得推送（D20） | `c0be5cc`、`5419a2c`、`3c3be06`、`c2a8a08`、`02c7a56` |
 | Phase 15 | 前置修复：上游错误阈值与 `done_with_failures`（ADR-024）、`workbench verify`（ADR-025）、训练进程的环境白名单（ADR-026）、flash-attn 用锁定的 torch 编译（ADR-027）；新增 `workbench serve probe` 与 `scripts/redact_paste.py`；写好 `docs/runbooks/phase15-gpu.md`。GPU 步骤未执行（D22） | `ec9c017`、`93f4145`、`2198134`、`deb8780`、`0b0ec22`、`3fac63c`、`3b43467` |
-| 收尾 | LIMITATIONS 分为"未验证"与"已验证"两节；README、CHANGELOG 与费用账本同步；按 TASK.md §6 执行最终验收清单（`docs/verification/logs/2026-09-25-final-checklist.log`） | `1671021`、`6663871` 与记录验收清单的提交 |
+| 收尾 | LIMITATIONS 分为"未验证"与"已验证"两节；README、CHANGELOG 与费用账本同步；按 `docs/process/TASK.md` §6 执行最终验收清单（`docs/verification/logs/2026-09-25-final-checklist.log`） | `1671021`、`6663871` 与记录验收清单的提交 |
 
 费用：本轮外部 API 调用累计 ¥3.1396（上界口径，明细见 `docs/verification/cost-ledger.md`），低于 N3 的 ¥30 上限；Phase 13 之后没有再调用任何付费 API。

@@ -50,7 +50,7 @@
 
 | 阶段 | 文件 |
 |---|---|
-| 9 | `TASK_v2.md`（新增），`docs/verification/2026-09-24-preflight.md`，`docs/verification/logs/2026-09-24-preflight-network.log` |
+| 9 | `TASK_v2.md`（新增；2026-09-25 移至 `docs/process/`），`docs/verification/2026-09-24-preflight.md`，`docs/verification/logs/2026-09-24-preflight-network.log` |
 | 10 | `results/registry.yaml`，`src/workbench/results/registry.py`（仅当新字段或表注需要渲染支持时），`docs/RESULTS.md`（生成），`docs/UPSTREAM.md`，`README.md`，`docs/LIMITATIONS.md`，`docs/verification/2026-09-24-paper-table4.md`，`docs/verification/2026-09-24-licenses.md`，`docs/verification/2026-09-24-model-cards.md`，`docs/verification/awm-license-issue-draft.md`，对应测试 |
 | 11 | `scripts/download_data.sh`（仅注释），`tests/fixtures/awm_mini/**`，`tests/integration/test_official_data.py`（新增），`pyproject.toml`（注册 `official_data` marker），`tests/conftest.py`，`configs/number_whitelist.yaml`（如需要），`docs/verification/2026-09-24-dataset.md`，`docs/verification/e_commerce_33-tools.*`，`docs/LIMITATIONS.md`，`docs/RECON.md` |
 | 12 | `docs/verification/logs/*`，`docs/verification/cost-ledger.md`，`docs/WALKTHROUGH.md`，`docs/LIMITATIONS.md`；仅在出现兼容性问题时修改 `src/workbench/llm/**` 并补单测和 ADR |
