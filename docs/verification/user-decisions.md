@@ -54,3 +54,11 @@ N5 核对（2026-09-24）：§2 中"本轮结束后从 `phase9-verification` 向
 | D16 | compose 中的 vllm 服务 | 授权在 `docker-compose.yml` 的 vllm 命令中加上 `--enable-auto-tool-choice --tool-call-parser hermes`，并加单测断言 compose 中 vllm 的参数与 `configs/serving/arctic-awm-4b.yaml` 一致，防止再次漂移。 |
 | D17 | 两项零成本工作（不调用任何付费 API） | (a) 用本地假上游代替 DeepSeek，重做"步骤中途中断后续跑"：确认中断确实落在某个 gen 步骤中间，续跑后结果正确；上次信号发错进程组的问题一并修正。<br>(b) 合成预算熔断：本地代理按账本累计费用，超过上限时拒绝转发并让当前步骤失败，提高上限后可以续跑；上限在配置中设置，默认 ¥5；补单测、写 ADR。 |
 | D18 | Phase 15 | **要做，采用 runbook 模式**：仓库主人在自己租的 GPU 机器上手动执行，那台机器上不运行 Claude Code。<br>- 先在当前容器完成 D13 的两项前置修复（`awm verify` 经本地代理运行、`train launch` 改用白名单），离线测试通过。<br>- 再写 `docs/runbooks/phase15-gpu.md`：机器要求（显存、CUDA 版本、磁盘）；从零开始的逐条命令及每步的预期输出与判定标准；需要回贴的日志清单与脱敏要求；预计耗时。<br>- 分两段：15A（24GB 显卡）：vLLM 服务 Arctic-AWM-4B，`vllm` 后端的 `workbench agent run`、`awm agent`、`awm verify` 各 1 次；15B（A100 级别）：安装 train 环境、preflight、smoke 训练（不超过 5 step）。<br>- 机器可能在国内（AutoDL），访问 Hugging Face 与 GitHub 受限：runbook 给出用 `HF_ENDPOINT` 从镜像站下载的方式，并标明哪些步骤需要外网。<br>- `awm verify`：从源码确认 `--mode code` 能否不需要 LLM 裁判；需要裁判时指向本机 vLLM 服务，并在 runbook 中注明"裁判为 Arctic-AWM-4B，仅用于打通链路"。<br>- 仓库主人回贴日志后，再更新 U1、U3、U4、U5、U8 与 LIMITATIONS。 |
+
+## 7. Phase 14 报告之后（2026-09-25）
+
+| # | 主题 | 决定 |
+|---|---|---|
+| D19 | 上游错误让步骤失败（Phase 14 报告的问题 1） | **做，加阈值**，作为 Phase 15 的第三项前置修复：<br>- 代理把"所有重试后仍以上游错误结束"的请求记入账本，状态为 failed；<br>- 新增配置 `synth.max_failed_requests`，默认 0。该步骤 failed 请求数超过阈值时，步骤判失败，可续跑，已付费的请求由缓存重放；超过 0 但不超过阈值时，步骤状态记为 `done_with_failures`，并在报告和 validation 输出中列出失败数，**不得记为 `done`**；<br>- runner 的判定逻辑与现有的 refused 检查统一；<br>- 全部离线测试，零成本：覆盖 402、429、5xx、网络错误四类，以及阈值为 0 和大于 0 两种配置；<br>- 写 ADR，更新 LIMITATIONS 中"步骤是否成功只看退出码"那一条。 |
+| D20 | Docker 镜像的分发（只改文档，不改代码） | 在 `docs/UPSTREAM.md` 与 ADR-003 中写明："Docker 镜像内含 AWM 代码，由于 AWM 目前没有许可证，镜像只用于本地和 CI 构建，不得推送到任何公开或私有的镜像仓库"；并检查所有工作流中都没有推送镜像的步骤。 |
+| D21 | `DEEPSEEK_API_KEY` 与 Phase 15 的顺序 | 仓库主人自己从环境设置中删除 `DEEPSEEK_API_KEY`。Phase 15 按计划继续：先完成三项前置修复（`awm verify` 经本地代理、`train launch` 白名单、D19），再写 `docs/runbooks/phase15-gpu.md`；**写完 runbook 后停下**，由仓库主人租 GPU 按它执行。 |
