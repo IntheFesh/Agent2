@@ -17,7 +17,7 @@
 | 项目 | 状态 | 执行情况 |
 |---|---|---|
 | 用 `claude/kind-gauss-3clgyp` 当前 HEAD 创建 `main` 并设为默认分支 | **已授权**（Phase 9 报告之后） | `main` 已于 2026-09-24 从 `f140123` 创建。默认分支的切换由仓库主人自己在 GitHub 设置中完成（Phase 10 报告之后的决定），Claude Code 不做。 |
-| 本轮结束后从 `phase9-verification` 向 `main` 开 PR | **已授权** | 待本轮最后一个阶段结束后执行。 |
+| 本轮结束后从 `phase9-verification` 向 `main` 开 PR | **已授权** | 2026-09-25 本轮收尾时执行（D22）。 |
 | 在 Snowflake-Labs/agent-world-model 开 issue 询问许可证 | **未授权** | 仓库主人用自己的账号发送（Phase 10 报告之后的决定）；Claude Code 不发送。草稿见 `docs/verification/awm-license-issue-draft.md`，其中的 "#17" 为纯文本（在上游仓库发出时会自动链接到其 PR #17），未改动。 |
 
 ## 3. Phase 10 报告之后（2026-09-24）
@@ -62,3 +62,9 @@ N5 核对（2026-09-24）：§2 中"本轮结束后从 `phase9-verification` 向
 | D19 | 上游错误让步骤失败（Phase 14 报告的问题 1） | **做，加阈值**，作为 Phase 15 的第三项前置修复：<br>- 代理把"所有重试后仍以上游错误结束"的请求记入账本，状态为 failed；<br>- 新增配置 `synth.max_failed_requests`，默认 0。该步骤 failed 请求数超过阈值时，步骤判失败，可续跑，已付费的请求由缓存重放；超过 0 但不超过阈值时，步骤状态记为 `done_with_failures`，并在报告和 validation 输出中列出失败数，**不得记为 `done`**；<br>- runner 的判定逻辑与现有的 refused 检查统一；<br>- 全部离线测试，零成本：覆盖 402、429、5xx、网络错误四类，以及阈值为 0 和大于 0 两种配置；<br>- 写 ADR，更新 LIMITATIONS 中"步骤是否成功只看退出码"那一条。 |
 | D20 | Docker 镜像的分发（只改文档，不改代码） | 在 `docs/UPSTREAM.md` 与 ADR-003 中写明："Docker 镜像内含 AWM 代码，由于 AWM 目前没有许可证，镜像只用于本地和 CI 构建，不得推送到任何公开或私有的镜像仓库"；并检查所有工作流中都没有推送镜像的步骤。 |
 | D21 | `DEEPSEEK_API_KEY` 与 Phase 15 的顺序 | 仓库主人自己从环境设置中删除 `DEEPSEEK_API_KEY`。Phase 15 按计划继续：先完成三项前置修复（`awm verify` 经本地代理、`train launch` 白名单、D19），再写 `docs/runbooks/phase15-gpu.md`；**写完 runbook 后停下**，由仓库主人租 GPU 按它执行。 |
+
+## 8. Phase 15 准备完成之后（2026-09-25）
+
+| # | 主题 | 决定 |
+|---|---|---|
+| D22 | Phase 15 的执行与本轮收尾 | 仓库主人**本轮暂不执行 Phase 15**。（同日较早的一条回贴消息中，说明与两份日志都是未填写的模板，没有据此更新任何验证状态。）按以下方式收尾：<br>- U1、U3、U4、U5、U8 保持未验证，原因写"Phase 15 runbook 已就绪（`docs/runbooks/phase15-gpu.md`），仓库主人尚未在 GPU 机器上执行"；<br>- 按 TASK_v2 §4 完成收尾：LIMITATIONS 分为"已验证"与"未验证"两节，同步更新 README 与 CHANGELOG，按 TASK.md §6 的最终验收清单逐条执行并贴出输出；<br>- 按 N5 从 `phase9-verification` 向 `main` 开 PR，描述列出本轮完成项、仍未验证项及原因、累计费用；<br>- 以后执行 Phase 15 时，仓库主人新开分支单独进行，回贴日志后再提一个小 PR。 |
