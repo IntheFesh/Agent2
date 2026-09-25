@@ -76,3 +76,22 @@ N5 核对（2026-09-24）：§2 中"本轮结束后从 `phase9-verification` 向
 | D23 | PR #1 与默认分支 | PR #1 已合并，默认分支已改为 `main`（仓库主人完成）。GitHub 记录 merged_at 2026-09-25T04:41:36Z；`main` 为 `bb8f504`，即 PR #1 的 head，是快进合并，没有单独的 merge commit。从 `main` 新建分支 `polish-v3`，进行 Phase 16–18。 |
 | D24 | 本轮规则 | R1–R14 与 N1–N4 全部继续有效；**不调用任何付费 API，LLM 只用 mock；不做任何评测**；工程数字只能由脚本实测，并写明测量命令；每个 Phase 结束停下报告，等"继续"。 |
 | D25 | 本轮的 PR | Phase 18 结束后，按 `docs/process/TASK.md` §6 重新执行最终验收清单，然后从 `polish-v3` 向 `main` 开 PR（**已授权**）。 |
+
+## 10. Phase 16 确认之后（2026-09-25）
+
+| # | 主题 | 决定 |
+|---|---|---|
+| D26 | 远端分支清理 | 授权删除 `claude/kind-gauss-3clgyp` 与 `phase9-verification`，条件依次为：`git ls-remote --symref origin HEAD` 显示默认分支是 `main`；`git diff origin/main origin/claude/kind-gauss-3clgyp` 与 `git diff origin/main origin/phase9-verification` 都为空（`71a7185` 是 PR #2 误操作留下的合并提交，没有内容变化，可以丢弃）；没有权限就停下报告。<br>执行结果（2026-09-25）：<br>- 默认分支是 `main`；<br>- 但 PR #3（"Polish v3"，06:38:25Z 创建，06:38:32Z 由仓库主人合并）已把 Phase 16 合入 `main`（合并提交 `97eaf7f`），两处字面 diff 都不为空（26 个文件，正是 Phase 16 的改动）；<br>- 包含关系核对通过：`phase9-verification` 是 `main` 的祖先；`claude/kind-gauss-3clgyp` 只多出 `71a7185`，其内容与 `bb8f504` 完全相同；<br>- 字面条件不满足，**两个分支都没有删除**，等仓库主人确认。 |
+| D27 | CI 触发条件 | docker-smoke 改为"push 到 `main` + 以 `main` 为目标的 pull_request"，删除按分支名列出的触发。`ci.yml` 没有按分支名列出（对所有 push 与 PR 都运行），按"如果它也逐个列了分支"的条件不改。从 `polish-v3` 向 `main` 开 draft PR，此后的检查随 PR 运行。 |
+| D28 | 本轮任务原文 | 存为 `docs/process/TASK_v3.md`，加入 `skip_files` 豁免，并同步更新固定豁免清单的单测。 |
+| D29 | Phase 17 预演的补充要求 | - `approval.require_preview` 按风险级别配置，默认 `{write: false, destructive: true}`；<br>- 为 true 且预演失败时只允许拒绝，不签发令牌；为 false 且预演失败时仍可批准，令牌绑定 `preview_unavailable` 状态，审计中记录，UI 审批卡片醒目标出"未预演"；<br>- 预演 diff 与真实 diff 只在结构层面比对：改动的表，新增、删除、修改的主键，改动的列名；<br>- 时间类字段与自动生成的值只记录、不比对；在 RECON 中写明识别这类列的依据，在审计中注明忽略了哪些列；补一个单测：两次执行只有时间戳不同，不应判为 mismatch；<br>- 影子环境从会话当前的数据库启动，不是初始数据库；<br>- 用脚本实测预演各阶段耗时（启动影子环境、执行、diff、回收），作为工程数字记录，并据此设定预演超时；<br>- 重新生成 README 截图时，另加一张整页截图（对话、时间线、带预演 diff 的审批卡片同屏）。 |
+| D30 | 本轮 PR 的合并 | Phase 18 结束且最终验收通过后，由 Claude Code 合并 `polish-v3` → `main` 的 PR：优先 merge commit，保留小提交；工具不支持时改用快进推送。合并后删除 `polish-v3`。 |
+
+
+## 11. Phase 17 确认之后（2026-09-25）
+
+| # | 主题 | 决定 |
+|---|---|---|
+| D31 | 远端分支清理（修订 D26 的条件） | `main` 前进后，"字面 diff 为空"不再适用，改为按包含关系判断：`phase9-verification` 是 `main` 的祖先；`claude/kind-gauss-3clgyp` 相对合并基的改动为空，只多出 PR #2 的空合并提交 `71a7185`。删除前再核对一次，通过后删除；没有权限就停下报告。<br>执行结果（2026-09-25）：<br>- 核对通过：默认分支是 `main`；`git merge-base --is-ancestor origin/phase9-verification origin/main` 返回 0；`claude/kind-gauss-3clgyp` 与 `main` 的合并基是 `bb8f504`，`git diff origin/main...origin/claude/kind-gauss-3clgyp` 为空，`git log origin/main..origin/claude/kind-gauss-3clgyp` 只有 `71a7185`；<br>- `git push origin --delete phase9-verification` 被拒绝（HTTP 403，本会话没有删除远端分支的权限），按指示停止，`claude/kind-gauss-3clgyp` 没有再尝试；<br>- **两个分支都没有删除**，留给仓库主人在 GitHub 上删除。删除前的分支头：`phase9-verification` = `bb8f504`，`claude/kind-gauss-3clgyp` = `71a7185`。 |
+| D32 | auto_approve 的 write 调用 | - 不跑预演；<br>- 令牌绑定 `preview_unavailable`，批准人记为 `policy:<规则编号>`；<br>- 执行后照常测量实际改动，与规则编号一起写入审计；<br>- require_human 的调用照常预演；<br>- "按预演影响范围决定是否自动放行（例如只改动指定表且不超过 N 行）"写进 `docs/IDEAS.md`，本轮不实现。 |
+| D33 | PR 的定时复查 | 取消每小时的定时复查。只在仓库主人发消息，或 CI 结果与预期不符时处理 PR，不必每小时汇报。 |

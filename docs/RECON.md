@@ -667,3 +667,79 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - Hugging Face API（2026-09-25）：`Snowflake/Arctic-AWM-4B` @`437dfa0` 的权重是两个 safetensors 分片，约 5.0 GB 与 3.8 GB；`Qwen/Qwen3-0.6B` 的 `main` 为 `c1899de289a04d12100db370d81485cdf75e47ca`。
   - 官方数据集中 `e_commerce_33` 任务 0 的纯代码 verifier：174 行，只 import `re` 与 `sqlite3`，以 `mode=ro` 打开数据库，没有写 SQL，也没有文件、网络或子进程调用。
   - 数据集 `gen_sample.jsonl` 中电话号码的写法：`555-111-2222`、`+1-312-555-0100`、`+12125550123`（`scripts/redact_paste.py` 按这些写法识别电话）。
+
+### Phase 17（2026-09-25）：审批前预演用到的事实
+
+AWM @`85e322f`，Python 3.12.3（标准库 `sqlite3` 链接 SQLite 3.45.1），LangGraph 1.2.12，MCP SDK 1.26.0。
+
+- **影子 server 写哪些文件**（`third_party/agent-world-model/awm/core/server.py`）：
+  - 显式传入 `--db_path`、`--temp_server_path`、`--output_dir` 时，AWM 只写这三处：
+    - 创建 `output_dir`（`:50`）；
+    - 把数据库复制为 `output_dir/initial.db`（`:67-68`）；
+    - 生成的 server 代码写到 `temp_server_path`（`:140`），其中的 `create_engine(...)` 被改写为指向 `db_path`（`:105-108`）；
+    - 代码再复制为 `output_dir/server_code.py`（`:152`）；
+    - `os.system("<python> <code> 2>&1 | tee output_dir/server.log")` 阻塞运行（`:161-163`），正常退出后才把数据库复制为 `output_dir/final.db`（`:166-168`）。
+  - 所以预演把三个路径都放在 `<run_dir>/previews/<id>/` 下，按进程组结束后删除这个目录，就不会留下文件。
+  - 被 SIGTERM/SIGKILL 结束时不会走到 `final.db` 的复制；即使走到，也在该目录内。
+- **SQLite**：
+  - `PRAGMA table_info` 每列返回 `(cid, name, type, notnull, dflt_value, pk)`（https://www.sqlite.org/pragma.html#pragma_table_info），`workbench.envs.changes` 用 `type` 与 `dflt_value` 识别时间列，用 `pk` 取主键；
+  - 类型恰为 `INTEGER` 的单列主键是 rowid 的别名，未指定时由 SQLite 按"当前最大值加一"分配（带 AUTOINCREMENT 时按 `sqlite_sequence`，https://www.sqlite.org/lang_createtable.html#rowid 、https://www.sqlite.org/autoinc.html ），从同一个数据库出发的两次插入得到同一个值，所以按值比对；
+  - 在线备份 `sqlite3.Connection.backup`（Python 标准库）在另一个连接持有数据库时也能得到一致的副本，预演和 checkpoint 都用它复制会话数据库（沿用 `envs/snapshot.py`）。
+- **LangGraph**：恢复被 `interrupt` 暂停的节点时整个节点重跑（本文 §10 "Phase 5"），所以预演放在 act 与 approve 之间单独的 preview 节点，结果存入 checkpoint。
+- **时间列与生成值的识别依据**：对官方 AgentWorldModel-1K（revision `dde80a0`，`data/awm1k`）的统计，用的正是 `changes.volatile_reason` 与"非 INTEGER 单列主键"两条规则。
+  - 命令：`uv run python <下面的脚本>`
+  - 输出：
+    - 1000 个场景共 18465 张表。主键：INTEGER rowid 别名 17248、复合 636、其它单列 570（新增行只比对行数）、无主键 11。
+    - 列：按值比对 105636；时间类型 40203；时间列名 881（声明为 TEXT/INTEGER/REAL 的 `*_at` 等）；时间默认值 56。
+    - 生成的 server 代码（出现次数/场景数）：
+      - `datetime.utcnow()` 27413/989：时间列在调用时写入，两次执行必然不同，所以只记录、不比对；
+      - `uuid4(` 81/34、`secrets.token_` 2/2、`random.` 74/20：token、slug、带前缀的 ID 等随机值，可能是 TEXT 主键，所以非 INTEGER 单列主键的表按行数比对；
+      - `httpx.` 1/1，`requests.`、`subprocess.`、`os.system(` 都是 0：预演再执行一次生成的代码，几乎不会有数据库之外的副作用（ADR-029"代价"）。
+  - 官方 `e_commerce_33` 的 `add_item_to_cart` 实测：预演与真实执行结构一致（match），新行的 `created_at`、`updated_at` 两次不同，被记为忽略的列（`tests/integration/test_official_data.py::test_preview_of_an_official_write_matches_and_ignores_time_columns`）。
+
+```python
+# Survey of the official AgentWorldModel-1K schemas and server code (docs/RECON.md "Phase 17").
+import json, re, sqlite3
+from collections import Counter
+from workbench.envs.changes import volatile_reason
+reasons, keys, tables = Counter(), Counter(), 0
+for line in open("data/awm1k/gen_db.jsonl", encoding="utf-8"):
+    con = sqlite3.connect(":memory:")
+    for t in json.loads(line)["db_schema"]["tables"]:
+        con.execute(t["ddl"]); tables += 1
+        info = con.execute(f'PRAGMA table_info("{t["name"]}")').fetchall()
+        pk = [r for r in info if r[5] > 0]
+        keys["composite" if len(pk) > 1 else "rowid (no pk)" if not pk else
+             "INTEGER (rowid alias)" if (pk[0][2] or "").strip().upper() == "INTEGER" else "other single-column"] += 1
+        for r in info:
+            reasons[volatile_reason(r[1], r[2] or "", r[4]) or "compared"] += 1
+code = Counter(); scen = Counter()
+patterns = {"datetime.utcnow()": r"datetime\.utcnow\(\)", "uuid4(": r"uuid4\(", "secrets.token_": r"secrets\.token_",
+            "random.": r"\brandom\.(?:randint|choice|random|choices|sample)\(", "httpx.": r"\bhttpx\.",
+            "requests.": r"\brequests\.(?:get|post|put|delete|patch)\(", "subprocess.": r"\bsubprocess\.", "os.system(": r"os\.system\("}
+for line in open("data/awm1k/gen_envs.jsonl", encoding="utf-8"):
+    src = json.loads(line)["full_code"]
+    for name, rx in patterns.items():
+        n = len(re.findall(rx, src)); code[name] += n; scen[name] += bool(n)
+print("tables:", tables)
+print("primary keys:", dict(keys))
+print("columns by rule:", dict(reasons))
+print("server code (occurrences / scenarios):", {k: (code[k], scen[k]) for k in patterns})
+```
+
+
+### Phase 18（2026-09-25）：审批策略用到的事实
+
+pydantic 2.12.5（pydantic-core 2.41.5），PyYAML 6.0.3，Python 3.12.3。
+
+- **pydantic 的未知字段**：
+  - `ConfigDict(extra="forbid")`（`pydantic/config.py:63`，默认是 `'ignore'`）让未声明的字段报错，错误类型为 `extra_forbidden`（`pydantic_core/core_schema.py:4234`）；
+  - `ValidationError.errors()` 的每一项带 `type`、`loc`（字段路径的元组）与 `msg`，`workbench.gateway.approval_policy` 据此拼出 `rules[0] (id x).args.quantity.lte` 这样的 YAML 路径；
+  - 实测：同一个模型的错误先列声明过的字段，未知字段排在后面（`tests/unit/test_approval_policy.py::test_schema_errors_name_every_problem`）；
+  - `BeforeValidator`（`pydantic/functional_validators.py:91`）中抛出的 `ValueError` 以 "Value error, " 开头，加载器去掉这个前缀。
+  - 为了不让 `True` 或 `"5"` 被悄悄转成数字，数值字段用 `BeforeValidator` 显式检查类型，不依赖 pydantic 的宽松转换。
+- **glob 匹配**：
+  - `fnmatch.fnmatchcase`（`/usr/lib/python3.12/fnmatch.py:64-71`）区分大小写；
+  - 模式被转换成以 `\Z` 结尾的正则（`:185`），用 `match` 从头匹配，所以是整名匹配：`e_commerce_*` 不匹配 `mini_e_commerce`；
+  - `*` 可以匹配 `_`。
+- **YAML**：`yaml.safe_load` 读取策略文件；空文件得到 `None`，按 `{}` 校验，报"version: Field required"。
