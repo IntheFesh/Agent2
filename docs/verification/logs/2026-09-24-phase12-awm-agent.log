@@ -1,0 +1,154 @@
+# 2026-09-24 Phase 12 step 3: one real-LLM 'awm agent' run (TASK_v2 N2: single run, single task; chain evidence only, not an evaluation)
+# machine: Claude Code cloud container (Linux x86_64, no GPU). OPENAI_API_KEY mapped from DEEPSEEK_API_KEY in the process env only.
+# scenario: official e_commerce_33 (AgentWorldModel-1K revision dde80a0, CC-BY-4.0, Snowflake), task index 0
+
+## why --mcp_url mode (server started by workbench env-manager) instead of --scenario auto-start
+# 1. auto-start ends with shutil.SameFileError: awm/core/server.py:70-82 creates the working DB as <output_dir>/final.db,
+#    then awm/core/agent.py:596-598 copies db_file_path onto <output_dir>/final.db (shutil.copy2 at :598; same file). Reproduced without an LLM:
+$ uv run python -c '<call awm.core.server._prepare_database(Config(scenario="e_commerce_33", envs_load_path=..., db_schema_path=data/awm1k/gen_db.jsonl, sample_path=data/awm1k/gen_sample.jsonl), <out>) then shutil.copy2(db_file_path, <out>/final.db)>'
+db_file_path: <out>/final.db | files: ['final.db', 'initial.db']
+copy2 raised shutil.SameFileError : '<out>/final.db' and '<out>/final.db' are the same file
+# 2. auto-start (start_server_process, awm/core/server.py:174-195) passes no --temp_server_path, so the server code is
+#    written next to --envs_path (awm/core/server.py:134-138), i.e. into data/awm1k when pointed at the official data.
+# 3. auto-start terminates only the launcher (awm/core/agent.py:605-612); RECON §10 Phase 2 showed the server survives.
+# --mcp_url + --scenario/--task_id is an upstream-supported combination (awm/core/agent.py:398-407, 433-458): the task is
+# looked up from --tasks_path, trajectory.json records scenario/task_id, and no DB is copied.
+
+## commands
+$ WORKBENCH_ENV__RUNS_DIR=data/p12/awm-runs uv run workbench env serve &          # control plane
+$ uv run workbench env up e_commerce_33 --session-id p12awm                     # -> healthy, http://127.0.0.1:18100/mcp
+$ OPENAI_API_KEY="$DEEPSEEK_API_KEY" uv run awm agent --scenario e_commerce_33 --task_id 0 \
+    --tasks_path data/awm1k/gen_tasks.jsonl --mcp_url http://127.0.0.1:18100/mcp \
+    --api_url https://api.deepseek.com --model deepseek-flash \
+    --output_dir data/p12/awm-agent/e_commerce_33_task_0
+# all other flags at upstream defaults (max_iterations 30, temperature 1.0, max_tokens 2048). DeepSeek ignores
+# max_completion_tokens (probe P4) and runs in its default thinking mode (no extra body; use_vllm_extras is False).
+$ uv run workbench env diff p12awm ; uv run workbench env down p12awm
+(all commands with PYTHONPYCACHEPREFIX=$PWD/.cache/pycache)
+
+## env-manager session (data/p12/awm-runs/p12awm/meta.json): explicit --db_path/--temp_server_path/--output_dir
+{
+  "session_id": "p12awm",
+  "scenario": "e_commerce_33",
+  "port": 18100,
+  "cmd": [
+    "/home/user/Agent2/.venv/bin/python",
+    "-m",
+    "awm.core.server",
+    "--scenario",
+    "e_commerce_33",
+    "--envs_load_path",
+    "data/awm1k/gen_envs.jsonl",
+    "--db_path",
+    "data/p12/awm-runs/p12awm/work.db",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "18100",
+    "--temp_server_path",
+    "data/p12/awm-runs/p12awm/temp_server.py",
+    "--output_dir",
+    "data/p12/awm-runs/p12awm/awm_server"
+  ]
+}
+## awm agent output (verbatim)
+start 2026-09-24T17:13:35Z
+Config(task=None, scenario='e_commerce_33', task_id=0, mcp_url='http://127.0.0.1:18100/mcp', api_url='https://api.deepseek.com', model='deepseek-flash', max_iterations=30, temperature=1.0, max_tokens=2048, output_dir='data/p12/awm-agent/e_commerce_33_task_0', envs_path='./outputs/gen_envs.jsonl', tasks_path='data/awm1k/gen_tasks.jsonl', db_path='./outputs/gen_db.jsonl', sample_path='./outputs/gen_sample.jsonl', verbose=True)
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:407 - Resolved task from scenario=e_commerce_33, task_id=0: Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under $200 to my cart in quantity 1.
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:461 - ================================================================================
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:462 - MCP Agent
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:463 - ================================================================================
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:464 - Task: Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under $200 to my cart in quantity 1.
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:465 - MCP Server: http://127.0.0.1:18100/mcp
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:466 - LLM API: https://api.deepseek.com
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:467 - Model: deepseek-flash
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:468 - Output: data/p12/awm-agent/e_commerce_33_task_0
+2026-09-24 17:13:38.072 | INFO     | awm.core.agent:run_agent:469 - ================================================================================
+2026-09-24 17:13:38.149 | INFO     | awm.core.agent:run_agent:477 - Connecting to MCP server and fetching tools...
+2026-09-24 17:13:38.990 | INFO     | awm.core.agent:run_agent:479 - Loaded 39 tools from MCP server
+2026-09-24 17:13:38.991 | INFO     | awm.core.agent:run_agent:492 - 
+--- Iteration 1/30 ---
+2026-09-24 17:13:40.388 | INFO     | awm.core.agent:run_agent:500 - Assistant (130 chars): I'll start by listing the available tools in this environment.
+
+<tool_call>
+{"name": "list_tools", "arguments": null}
+</tool_call>
+2026-09-24 17:13:40.388 | INFO     | awm.core.agent:run_agent:501 - Tool calls: 1
+2026-09-24 17:13:40.388 | INFO     | awm.core.agent:run_agent:532 - Executing: list_tools
+2026-09-24 17:13:40.388 | INFO     | awm.core.agent:run_agent:551 - Tool response (31834 chars): Available MCP Tools (39 tools):
+================================================================================
+
+1. mcp_tool_mcp_server_search_products
+   Description: Search products with filters and sorting
+   Search products by text and optional filters like category, Prime, rating, price, and sort order.
+   ### Responses:
+   **200**: Successful Response (Success Response)
+   Content-Type: application/json
+   **Example Response:**
+   ```json
+   {
+   "products": [
+   {
+   "product": {
+   "id"...
+2026-09-24 17:13:40.388 | INFO     | awm.core.agent:run_agent:492 - 
+--- Iteration 2/30 ---
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:500 - Assistant (360 chars): I'll search for the product with the appropriate filters.
+
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="call_tool">
+{"tool_name": "mcp_tool_mcp_server_search_products", "arguments": "{\"query\": \"wireless noise cancelling headphones\", \"max_price\": 200, \"sort_by\": \"average_rating\", \"limit\": 20}"}
+</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:501 - Tool calls: 0
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:507 - No tool calls detected - task complete.
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:508 - 
+======================================== Final Answer ========================================
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:509 - I'll search for the product with the appropriate filters.
+
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="call_tool">
+{"tool_name": "mcp_tool_mcp_server_search_products", "arguments": "{\"query\": \"wireless noise cancelling headphones\", \"max_price\": 200, \"sort_by\": \"average_rating\", \"limit\": 20}"}
+</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:510 - ================================================================================
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:573 - ================================================================================
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:574 - Agent execution complete. Total iterations: 2
+2026-09-24 17:13:42.078 | INFO     | awm.core.agent:run_agent:575 - ================================================================================
+2026-09-24 17:13:42.079 | INFO     | awm.core.agent:run_agent:593 - Saved trajectory to data/p12/awm-agent/e_commerce_33_task_0/trajectory.json
+2026-09-24 17:13:42.079 | INFO     | awm.core.agent:run_agent:601 - Run outputs saved to: data/p12/awm-agent/e_commerce_33_task_0
+
+real	0m6.942s
+user	0m3.890s
+sys	0m0.261s
+exit=0
+end 2026-09-24T17:13:42Z
+
+## workbench env diff p12awm (after the run)
+{
+  "changed": false,
+  "tables_added": [],
+  "tables_removed": [],
+  "tables": {}
+}
+
+## trajectory.json (committed copy with the AWM system prompt and the list_tools dump omitted: 2026-09-24-phase12-awm-agent.trajectory.json)
+top-level keys: ['scenario', 'task_id', 'task', 'model', 'api_url', 'max_iterations', 'temperature', 'total_iterations', 'timestamp', 'trajectory', 'messages']
+{'scenario': 'e_commerce_33', 'task_id': 0, 'model': 'deepseek-flash', 'api_url': 'https://api.deepseek.com', 'max_iterations': 30, 'temperature': 1.0, 'total_iterations': 2, 'timestamp': '20260924_171338'}
+{'iteration': 1, 'role': 'assistant', 'content_chars': 130, 'tool_calls': ['list_tools'], 'is_final': False, 'tool_response_chars': 31834}
+{'iteration': 2, 'role': 'assistant', 'content_chars': 360, 'tool_calls': [], 'is_final': True, 'tool_response_chars': 0}
+messages roles: ['system', 'user', 'assistant', 'tool', 'assistant']
+iteration 2 content (verbatim):
+I'll search for the product with the appropriate filters.
+
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="call_tool">
+{"tool_name": "mcp_tool_mcp_server_search_products", "arguments": "{\"query\": \"wireless noise cancelling headphones\", \"max_price\": 200, \"sort_by\": \"average_rating\", \"limit\": 20}"}
+</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>
+
+## processes after 'env down' and control-plane shutdown: no live awm.core.server / temp_server / env serve processes
+## balance cross-check (USD, delta only): immediately before -> after this run: 0.00

@@ -1,0 +1,74 @@
+# 2026-09-24 Phase 12.5 item 5: subprocess secret isolation (ADR-019). CPU only; no LLM involved.
+# machine: Claude Code cloud container (Linux x86_64, no GPU); dataset data/awm1k revision dde80a0
+# The tests plant fake values (planted-not-a-real-secret) and print variable NAMES only, never values.
+
+## 1. the item-5 tests (unit + real AWM integration)
+$ uv run pytest -v -p no:warnings tests/unit/test_subprocess_env.py tests/unit/test_env_manager.py::test_env_server_process_gets_no_secrets tests/integration/test_env_real_awm.py::test_env_server_process_tree_sees_no_secrets tests/integration/test_synth_validate_real_awm.py
+tests/unit/test_subprocess_env.py::test_allowlist_keeps_only_base_vars PASSED [ 12%]
+tests/unit/test_subprocess_env.py::test_child_process_sees_no_api_keys PASSED [ 25%]
+tests/unit/test_subprocess_env.py::test_gen_steps_get_a_placeholder_key_and_validation_none PASSED [ 37%]
+tests/unit/test_subprocess_env.py::test_direct_gen_step_gets_llm_and_network_settings_only PASSED [ 50%]
+tests/unit/test_subprocess_env.py::test_synth_validate_command_passes_no_secrets PASSED [ 62%]
+tests/unit/test_env_manager.py::test_env_server_process_gets_no_secrets PASSED [ 75%]
+tests/integration/test_env_real_awm.py::test_env_server_process_tree_sees_no_secrets PASSED [ 87%]
+tests/integration/test_synth_validate_real_awm.py::test_validate_run_on_generated_like_dir PASSED [100%]
+============================== 8 passed in 17.00s ==============================
+
+## 2. negative control: env manager temporarily reverted to env = dict(os.environ)
+$ uv run pytest -q -p no:warnings tests/integration/test_env_real_awm.py::test_env_server_process_tree_sees_no_secrets tests/unit/test_env_manager.py::test_env_server_process_gets_no_secrets
+E           AssertionError: 3796
+E           assert ['ANY_VENDOR_...API_KEY', ...] == []
+E       AssertionError: assert (['ANY_VENDOR_...API_KEY', ...] == []
+2 failed in 6.00s
+# (restored; git diff of manager.py shows only the fix)
+
+## 3. what the official env code reads from the environment (regex scan of all 1000 full_code entries)
+$ uv run python scan_env_reads.py data/awm1k/gen_envs.jsonl
+{
+ "scenarios": 1000,
+ "env_var_reads": {
+  "PORT": 1000,
+  "DATABASE_PATH": 1000,
+  "HOST": 1000
+ },
+ "network_or_process_imports": {
+  "urllib": 3,
+  "httpx": 1
+ },
+ "whole_environ_access": 0,
+ "e_commerce_33": {
+  "env_reads": [
+   "DATABASE_PATH",
+   "HOST",
+   "PORT"
+  ],
+  "net_imports": [],
+  "whole_environ": false
+ }
+}
+
+## appendix: scan_env_reads.py
+"""Offline scan of official env code: which env vars it reads, which network clients it imports."""
+import json, re, sys
+from collections import Counter
+from pathlib import Path
+
+path = Path(sys.argv[1])
+ENV_READ = re.compile(r"""os\.(?:environ\.get|getenv|environ\[)\s*\(?\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]""")
+ENV_WHOLE = re.compile(r"os\.environ(?!\s*(?:\.get|\[))")
+NET = re.compile(r"^\s*(?:import|from)\s+(requests|httpx|urllib|urllib3|aiohttp|socket|http\.client|smtplib|ftplib|subprocess)\b", re.M)
+names, nets, whole, per = Counter(), Counter(), 0, {}
+total = 0
+for line in path.open(encoding="utf-8"):
+    if not line.strip():
+        continue
+    r = json.loads(line); total += 1
+    code = r.get("full_code", "")
+    reads = set(ENV_READ.findall(code))
+    names.update(reads)
+    nets.update(set(NET.findall(code)))
+    if ENV_WHOLE.search(code):
+        whole += 1
+    if r["scenario"] in ("e_commerce_33",):
+        per[r["scenario"]] = {"env_reads": sorted(reads), "net_imports": sorted(set(NET.findall(code))), "whole_environ": bool(ENV_WHOLE.search(code))}
+print(json.dumps({"scenarios": total, "env_var_reads": dict(names.most_common()), "network_or_process_imports": dict(nets), "whole_environ_access": whole, "e_commerce_33": per.get("e_commerce_33")}, indent=1))

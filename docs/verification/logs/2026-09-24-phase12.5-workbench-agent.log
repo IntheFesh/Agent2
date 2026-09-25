@@ -1,0 +1,180 @@
+# 2026-09-24 Phase 12.5: the one additional 'workbench agent run' authorized after items 1-5, to confirm the fixes did not break the chain.
+# Single chain demo, not an evaluation (单次链路演示，不构成评测). Code at commit f135189 (items 1-5 of Phase 12.5).
+# machine: Claude Code cloud container (Linux x86_64, no GPU). Key read from DEEPSEEK_API_KEY by name; never printed.
+# scenario: official e_commerce_33 (AgentWorldModel-1K revision dde80a0, CC-BY-4.0), task index 0, request = task text verbatim
+
+## configuration (process environment only; no .env file; budget and max_tokens left at their defaults)
+PYTHONPYCACHEPREFIX=$PWD/.cache/pycache
+WORKBENCH_LLM__BACKEND=openai_compat
+WORKBENCH_LLM__BASE_URL=https://api.deepseek.com
+WORKBENCH_LLM__MODEL=deepseek-flash              # DeepSeek default thinking mode left unchanged
+WORKBENCH_LLM__API_KEY_ENV=DEEPSEEK_API_KEY
+# no WORKBENCH_LLM__MAX_TOKENS / WORKBENCH_AGENT__TOKEN_BUDGET: defaults 8192 / 240000 (ADR-018)
+WORKBENCH_ENV__RUNS_DIR=data/p125/runs
+WORKBENCH_GATEWAY__AUDIT_PATH=data/p125/audit.jsonl
+WORKBENCH_AGENT__CHECKPOINT_DB=data/p125/checkpoints.sqlite
+WORKBENCH_AGENT__MEMORY_DB=data/p125/memory.sqlite
+
+## pre-run checks (free): DEEPSEEK_API_KEY present (existence only); `workbench doctor` llm: https://api.deepseek.com/models reachable
+
+## command
+$ time uv run workbench agent run "<e_commerce_33 task 0>" --scenario e_commerce_33 --approve auto --approver claude-code-operator
+# approval: decided in advance by the operator (Claude Code) for this demo; the gate itself still pauses the graph,
+# records approval_requested/approval_granted and issues a one-time token for each write call.
+
+## output (verbatim)
+start 2026-09-24T18:37:19Z
+2026-09-24 18:37:23.092 | INFO     | awm.core.reset:process_schema:28 - resetting database for e_commerce_33
+2026-09-24 18:37:23.093 | INFO     | awm.core.db:create_sqlite_database:79 - Creating database for e_commerce_33...
+2026-09-24 18:37:23.151 | SUCCESS  | awm.core.db:create_sqlite_database:107 - Database created with 19 tables: ['users', 'product_categories', 'products', 'product_versions', 'product_offers', 'product_subscription_offers', 'product_aggregates', 'user_addresses', 'user_payment_methods', 'user_devices', 'carts', 'cart_items', 'orders', 'order_items', 'returns', 'wishlists', 'wishlist_items', 'user_subscriptions', 'product_reviews']
+2026-09-24 18:37:23.157 | INFO     | awm.core.sample:execute_sample_data:108 - e_commerce_33: 133/133 statements executed with 0 failures
+session 709b8875d89f: 39 tools from http://127.0.0.1:18100/mcp
+tool e_commerce_33__search_products -> ok (allowed)
+tool e_commerce_33__list_product_offers -> ok (allowed)
+approval_required e_commerce_33__get_or_create_active_cart
+approval_granted e_commerce_33__get_or_create_active_cart
+tool e_commerce_33__get_or_create_active_cart -> ok (allowed)
+approval_required e_commerce_33__add_item_to_cart
+approval_granted e_commerce_33__add_item_to_cart
+tool e_commerce_33__add_item_to_cart -> ok (allowed)
+memory_saved headphone_budget_ceiling
+memory_saved cart_id
+answer Done! Here's a summary:
+
+**Search results** for "wireless noise cancelling headphones" (sorted by average
+rating):
+
+| Product | Rating | Lowest active offer |
+|---|---|---|
+| Bose QuietComfort 35 II | 4.8 ⭐ | $299.99 ❌ (over $200) |
+| **Sony WH-CH710N** | **4.5 ⭐** | **$149.99 ✅** |
+| Budget Wireless (SoundMax) | 3.9 ⭐ | $89.99 |
+
+**Note:** The top-rated item overall (Bose QuietComfort 35 II, 4.8) was **not 
+eligible** — its only active offer is $299.99, which exceeds your $200 limit. So
+the **top-rated item under $200** is the **Sony WH-CH710N Wireless Noise 
+Cancelling Headphones** at **$149.99**.
+
+**Added to your cart:**
+- Product: Sony WH-CH710N Wireless Noise Cancelling Headphones
+- Price: $149.99 USD
+- Quantity: 1
+- Cart: active cart (#1), item id 4
+
+Would you like me to preview checkout totals or proceed with the order?
+{
+  "changed": true,
+  "tables_added": [],
+  "tables_removed": [],
+  "tables": {
+    "cart_items": {
+      "rows_before": 3,
+      "rows_after": 4,
+      "added": [
+        4
+      ],
+      "removed": [],
+      "changed": []
+    }
+  }
+}
+
+real	0m25.134s
+user	0m7.982s
+sys	0m1.064s
+exit=0
+end 2026-09-24T18:37:44Z
+
+## env-manager launch of the AWM server (data/p125/runs/<sid>/meta.json): explicit --db_path/--temp_server_path/--output_dir;
+## since f135189 the server process gets the allowlisted environment only (ADR-019)
+{
+  "session_id": "709b8875d89f",
+  "scenario": "e_commerce_33",
+  "port": 18100,
+  "cmd": [
+    "/home/user/Agent2/.venv/bin/python",
+    "-m",
+    "awm.core.server",
+    "--scenario",
+    "e_commerce_33",
+    "--envs_load_path",
+    "data/awm1k/gen_envs.jsonl",
+    "--db_path",
+    "data/p125/runs/709b8875d89f/work.db",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "18100",
+    "--temp_server_path",
+    "data/p125/runs/709b8875d89f/temp_server.py",
+    "--output_dir",
+    "data/p125/runs/709b8875d89f/awm_server"
+  ]
+}
+## row-level DB diff (cart_items, initial.db -> work.db) and the offer that was added
+initial.db cart_items (id, cart_id, product_offer_id, quantity, created_at, updated_at):
+   (1, 1, 20, 1, '2026-09-23 18:37:23', '2026-09-23 18:37:23')
+   (2, 3, 18, 2, '2026-09-22 18:37:23', '2026-09-22 18:37:23')
+   (3, 2, 11, 1, '2026-08-25 18:37:23', '2026-08-25 18:37:23')
+work.db cart_items (id, cart_id, product_offer_id, quantity, created_at, updated_at):
+   (1, 1, 20, 1, '2026-09-23 18:37:23', '2026-09-23 18:37:23')
+   (2, 3, 18, 2, '2026-09-22 18:37:23', '2026-09-22 18:37:23')
+   (3, 2, 11, 1, '2026-08-25 18:37:23', '2026-08-25 18:37:23')
+   (4, 1, 1, 1, '2026-09-24 18:37:39.267449', '2026-09-24 18:37:39.267449')
+product_offers id=1: (1, 1, 149.99, 'USD', 1)
+products id=1: (1, 'Sony WH-CH710N Wireless Noise Cancelling Headphones')
+tables compared row by row: 19; changed: ['cart_items'] (get_or_create_active_cart found the existing active cart 1; carts unchanged)
+
+## trace summary (full trace: 2026-09-24-phase12.5-workbench-agent.trace.jsonl)
++  0.00s {"type": "session_created", "scenario": "e_commerce_33", "tools": 39, "url": "http://127.0.0.1:18100/mcp"}
++  0.02s {"type": "node", "node": "intake", "tools": 39, "memories": 0}
++  2.79s {"type": "llm", "purpose": "plan", "tokens": 12586, "prompt_version": 1}
++  2.79s {"type": "node", "node": "plan", "steps": [{"description": "Search for 'wireless noise cancelling headphones' sorted by average_rating (optionally with max_price 200) and identify the top-rated item u
++  4.34s {"type": "llm", "purpose": "act", "step": 1, "tokens": 14515}
++  4.34s {"type": "node", "node": "act", "step": 1, "tool": "e_commerce_33__search_products", "arguments": {"query": "wireless noise cancelling headphones", "sort_by": "average_rating", "max_price": 200}, "ris
++  4.45s {"type": "tool_call", "trace_id": "2fc5c49cae9349e29355351ba32b88a7", "tool": "e_commerce_33__search_products", "status": "ok", "text": "{\n  \"products\": [\n    {\n      \"product\": {\n        \"id
++  7.02s {"type": "llm", "purpose": "act", "step": 2, "tokens": 15512}
++  7.02s {"type": "node", "node": "act", "step": 2, "tool": "e_commerce_33__list_product_offers", "arguments": {"product_id": 2}, "risk": "read"}
++  7.11s {"type": "tool_call", "trace_id": "2fb372dc2e294d0cbd699842a01d0dbd", "tool": "e_commerce_33__list_product_offers", "status": "ok", "text": "{\n  \"offers\": [\n    {\n      \"id\": 2,\n      \"produc
++ 10.08s {"type": "llm", "purpose": "act", "step": 3, "tokens": 16100}
++ 10.08s {"type": "node", "node": "act", "step": 3, "tool": "e_commerce_33__get_or_create_active_cart", "arguments": {}, "risk": "write"}
++ 10.08s {"type": "approval_requested", "tool": "e_commerce_33__get_or_create_active_cart", "arguments": {}, "risk": "write"}
++ 10.09s {"type": "approval_granted", "tool": "e_commerce_33__get_or_create_active_cart", "approver": "claude-code-operator"}
++ 10.17s {"type": "tool_call", "trace_id": "58d135382eac41609e72d74c9849cbb1", "tool": "e_commerce_33__get_or_create_active_cart", "status": "ok", "text": "{\n  \"cart\": {\n    \"id\": 1,\n    \"user_id\": 1,
++ 11.70s {"type": "llm", "purpose": "act", "step": 4, "tokens": 16289}
++ 11.70s {"type": "node", "node": "act", "step": 4, "tool": "e_commerce_33__add_item_to_cart", "arguments": {"product_offer_id": 1, "quantity": 1}, "risk": "write"}
++ 11.70s {"type": "approval_requested", "tool": "e_commerce_33__add_item_to_cart", "arguments": {"product_offer_id": 1, "quantity": 1}, "risk": "write"}
++ 11.71s {"type": "approval_granted", "tool": "e_commerce_33__add_item_to_cart", "approver": "claude-code-operator"}
++ 11.81s {"type": "tool_call", "trace_id": "c4d67fa731f74972b2cf2fc27853d84c", "tool": "e_commerce_33__add_item_to_cart", "status": "ok", "text": "{\n  \"cart_item\": {\n    \"id\": 4,\n    \"cart_id\": 1,\n  
++ 14.03s {"type": "llm", "purpose": "act", "step": 5, "tokens": 16675}
++ 14.03s {"type": "node", "node": "act", "step": 5, "answer": "Done! Here's a summary:\n\n**Search results** for \"wireless noise cancelling headphones\" (sorted by average rating):\n\n| Product | Rating | Low
++ 16.59s {"type": "memory_saved", "key": "headphone_budget_ceiling", "source": "user_stated"}
++ 16.59s {"type": "memory_saved", "key": "cart_id", "source": "tool_result"}
++ 16.59s {"type": "node", "node": "verify", "complete": true, "missing": []}
++ 16.60s {"type": "final", "answer": "Done! Here's a summary:\n\n**Search results** for \"wireless noise cancelling headphones\" (sorted by average rating):\n\n| Product | Rating | Lowest active offer |\n|---|
+LLM calls with token events: 6 (plan + 5 act); verify adds 2059 tokens; tokens_used total = 93736; act steps = 5; termination = None
+
+## gateway audit (data/p125/audit.jsonl, the gateway's own redaction)
+{"trace_id": "2fc5c49cae9349e29355351ba32b88a7", "session_id": "709b8875d89f", "tool": "e_commerce_33__search_products", "risk": "read", "decision": "allowed", "approver": null, "args_summary": "{\"query\": \"wireless noise cancelling headphones\", \"sort_by\": \"average_rating\", \"max_price\": 200}", "result_summary": "{\n  \"products\": [\n    {\n      \"product\": {\n        \"id\": 2,\n        \"title\": \"Bose QuietComfort 35 II Wireless Bluetooth Headphones\",\n        \"description\": \"Premium wireless noise cancelling headphones with Alexa voice control.\",\n        \"brand\": \"Bose\",\n        \"category_id\": 2,\n        \"is_pri...", "status": "ok", "duration_ms": 110.1, "ts": 1790275051.9277203}
+{"trace_id": "2fb372dc2e294d0cbd699842a01d0dbd", "session_id": "709b8875d89f", "tool": "e_commerce_33__list_product_offers", "risk": "read", "decision": "allowed", "approver": null, "args_summary": "{\"product_id\": 2}", "result_summary": "{\n  \"offers\": [\n    {\n      \"id\": 2,\n      \"product_id\": 2,\n      \"seller_id\": 3,\n      \"sku\": \"BOSE-QC35II-SLV\",\n      \"price\": 299.99,\n      \"currency\": \"USD\",\n      \"in_stock_quantity\": 20,\n      \"is_prime_eligible\": true,\n      \"is_active\": true,\n      \"created_at\": \"2025-12-18T18:37:23\",\n   ...", "status": "ok", "duration_ms": 82.0, "ts": 1790275054.5826366}
+{"trace_id": "58d135382eac41609e72d74c9849cbb1", "session_id": "709b8875d89f", "tool": "e_commerce_33__get_or_create_active_cart", "risk": "write", "decision": "allowed", "approver": "claude-code-operator", "args_summary": "{}", "result_summary": "{\n  \"cart\": {\n    \"id\": 1,\n    \"user_id\": 1,\n    \"status\": \"active\",\n    \"created_at\": \"2026-09-23T18:37:23\",\n    \"updated_at\": \"2026-09-23T18:37:23\"\n  }\n}", "status": "ok", "duration_ms": 77.3, "ts": 1790275057.6429484}
+{"trace_id": "c4d67fa731f74972b2cf2fc27853d84c", "session_id": "709b8875d89f", "tool": "e_commerce_33__add_item_to_cart", "risk": "write", "decision": "allowed", "approver": "claude-code-operator", "args_summary": "{\"product_offer_id\": 1, \"quantity\": 1}", "result_summary": "{\n  \"cart_item\": {\n    \"id\": 4,\n    \"cart_id\": 1,\n    \"product_offer_id\": 1,\n    \"quantity\": 1,\n    \"created_at\": \"2026-09-24T18:37:39.267449\",\n    \"updated_at\": \"2026-09-24T18:37:39.267449\"\n  }\n}", "status": "ok", "duration_ms": 96.1, "ts": 1790275059.2844472}
+
+## what this run shows about each Phase 12.5 fix (engineering observations from this one run; not an evaluation)
+# item 1 (ADR-015): both write tools the model called were already graded write by name and needed approval:
+#   get_or_create_active_cart is a GET route, graded write by its verb 'create' (source heuristic; the floor
+#   does not apply to GET); add_item_to_cart is POST, verb 'add' => write, floor write (no change).
+#   Checked with workbench.gateway.policy.classify + workbench.envs.catalog.load_route_methods on data/awm1k.
+# item 2 (ADR-016): the audit summaries keep the microsecond timestamp '2026-09-24T18:37:39.267449'; '[PHONE]' occurs 0 times
+#   (Phase 12: the same field became '2026-09-24T17:05:[PHONE]').
+# item 3 (ADR-017): act calls 2-5 carried native tools and earlier assistant turns and none failed: an LLM error
+#   (for example HTTP 400) would end the run with a 'terminated' event, reason llm_error (agent/nodes/act.py:20-24);
+#   this trace has none and termination is None (event types: session_created 1, node 8, llm 6, tool_call 4,
+#   approval_requested 2, approval_granted 2, memory_saved 2, final 1). Whether reasoning_content was attached is not
+#   recorded in the trace, and DeepSeek also returned 200 without it in Phase 12 (LIMITATIONS §6), so this run cannot
+#   show the pass-back itself; the unit tests do (tests/unit/test_llm_reasoning.py).
+# item 4 (ADR-018): tokens per act call 14515, 15512, 16100, 16289, 16675 (Phase 12: 25764, 26615, 27403, 27741);
+#   plan 12586; tokens_used 93736 with the default budget 240000 and default max_tokens 8192 (no overrides).
+# item 5 (ADR-019): the official e_commerce_33 server was started with the allowlisted environment and served all 39 tools.
+
+## balance cross-check (USD, delta only): immediately before -> immediately after this run: 0.00

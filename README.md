@@ -3,8 +3,8 @@
 > **English summary.** BizAgent Workbench is an application/engineering layer around Snowflake-Labs/agent-world-model (AWM) and Agent-One-Lab/AgentFly.
 > It runs isolated AWM MCP environments per session, puts every tool call behind a deny-first MCP gateway with one-time approval tokens and audit logs, and drives them with a LangGraph agent, an HTTP/SSE API and a small web UI.
 > It also orchestrates AWM's synthesis pipeline (dry-run by default) and a smoke-only training launcher in a separate environment.
-> Everything runs on CPU with a scripted mock LLM; GPU serving and training are provided as scripts and marked UNVERIFIED-LOCAL.
-> This repository produces no model performance numbers: paper numbers live only in `results/registry.yaml`, and the application layer has never been benchmarked.
+> Everything runs on CPU with a scripted mock LLM; GPU serving and training come as scripts plus a step-by-step runbook, still marked UNVERIFIED-LOCAL.
+> This repository produces no model performance numbers: paper numbers live only in `results/registry.yaml` (checked against arXiv 2602.10090 v3), and the application layer has never been benchmarked.
 
 **一句话定位**：把 AWM 的合成环境与 AgentFly 的训练框架，组织成一个可部署、可审计、可演示的企业 MCP 智能体工作台。只改"怎么用、怎么部署、怎么管、怎么看"，不改"模型有多强"。
 
@@ -49,16 +49,26 @@ uv run workbench agent run --scenario mini_e_commerce --dataset-dir tests/fixtur
   "Add the best wireless noise cancelling headphones under \$200 to my cart"
 ```
 
+Docker 版本（CPU、mock LLM）：需要 Docker 与 Compose v2，并且检出目录中不能已有 `./data` 与 `.env`。
+
+```bash
+python3 scripts/docker_smoke.py   # 构建 → 启动 env-manager 与 app → 经 HTTP API 走一遍上面的演示 → 停止
+```
+
+GitHub Actions 的 docker-smoke 任务在每次 push 到 `phase9-verification` 与 `main` 时运行这条命令（证据：[docs/verification/2026-09-24-docker-smoke.md](docs/verification/2026-09-24-docker-smoke.md)）。
+
+镜像内含 AWM 代码，而 AWM 没有许可证，所以镜像只用于本地和 CI 构建，不得推送到任何镜像仓库（ADR-003）。
+
 完整学习路线见 [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)。
 
 ## GPU 部署路径（UNVERIFIED-LOCAL）
 
-以下步骤需要 CUDA GPU 与 `huggingface.co` 访问，本仓库的开发沙箱无法验证（见 [docs/LIMITATIONS.md](docs/LIMITATIONS.md)）。
+截至 2026-09-25 本轮收尾，下面需要 GPU 的步骤都**还没有在 GPU 上执行过**：Phase 15 runbook 已就绪，仓库主人尚未在 GPU 机器上执行（`docs/verification/user-decisions.md` D22；对应 [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §1.1 的 U1、U3、U4、U5、U8）。[docs/runbooks/phase15-gpu.md](docs/runbooks/phase15-gpu.md) 给出从零开始的逐条命令、预期输出、回贴与脱敏要求，以及国内镜像站的用法。
 
-1. 数据：`make data`（下载 AgentWorldModel-1K 到 `data/awm1k/`，不入库；下载前请阅读其许可证）。
-2. 模型服务：`scripts/serve_vllm.sh`（参数来自 `configs/serving/arctic-awm-4b.yaml`，可先用 `uv run workbench serve vllm-cmd` 查看）。
-3. 应用：`WORKBENCH_LLM__BACKEND=vllm uv run workbench api serve`；或 `docker compose --profile gpu up`（env-manager、app、vllm 三个服务）。
-4. 训练（仅 smoke）：初始化 AgentFly 的嵌套 `verl` 子模块 → `cd train && uv sync` → `uv run workbench train preflight` → `uv run workbench train launch --execute`。产物目录标记 `NO_RESULTS`，不得用于任何效果结论。
+1. 数据：`make data`（下载 AgentWorldModel-1K 到 `data/awm1k/`，不入库；CC-BY-4.0，使用时请署名）。**已验证**（2026-09-24，CPU 容器）。
+2. 模型服务：`scripts/serve_vllm.sh`（参数来自 `configs/serving/arctic-awm-4b.yaml`，可先用 `uv run workbench serve vllm-cmd` 查看；服务起来后可用 `uv run workbench serve probe` 检查两类工具调用请求）。未验证（U1）。
+3. 应用：`WORKBENCH_LLM__BACKEND=vllm uv run workbench api serve`；或 `docker compose --profile gpu up`（env-manager、app、vllm 三个服务）。不带 `gpu` profile 的 compose 已在 GitHub 托管 runner 上验证（2026-09-24）；`vllm` 后端与 `gpu` profile 未验证（U1）。
+4. 训练（仅 smoke）：经 HTTPS 初始化 AgentFly 的嵌套 `verl` 子模块 → `cd train && uv sync`（flash-attn 在本机编译）→ `uv run workbench train preflight` → `uv run workbench train launch --execute`。产物目录标记 `NO_RESULTS`，不得用于任何效果结论。未验证（U3、U4、U5）。
 
 ## 与上游的关系
 
@@ -67,6 +77,8 @@ uv run workbench agent run --scenario mini_e_commerce --dataset-dir tests/fixtur
 | Snowflake-Labs/agent-world-model | `third_party/agent-world-model` @85e322f | 环境建库、MCP server、合成 CLI | **无** |
 | Agent-One-Lab/AgentFly | `third_party/AgentFly` @1256586 | 只在独立 train 环境中使用 | Apache-2.0 |
 | Agent-One-Lab/verl（AgentFly 嵌套） | 默认不初始化 | smoke 训练 | Apache-2.0 |
+| HF 数据集 Snowflake/AgentWorldModel-1K | `make data` 下载到 `data/awm1k/`（不入库） | 官方场景 | CC-BY-4.0 |
+| HF 模型 Snowflake/Arctic-AWM-4B/8B/14B | 不入库，vLLM 运行时拉取 | 模型服务 | Apache-2.0 |
 
 - 上游只以固定 SHA 的 submodule 引用，从未修改（`patches/` 为空）。
 - 自有代码全部在 `src/workbench/`。
@@ -74,9 +86,17 @@ uv run workbench agent run --scenario mini_e_commerce --dataset-dir tests/fixtur
 
 ## 结果说明
 
-本仓库**不产生任何模型性能数字**，也没有对应用层做过效果评测（ADR-013）。论文报告的数字只登记在 `results/registry.yaml`，由它生成 [docs/RESULTS.md](docs/RESULTS.md)。那些数字是论文报告值，由官方模型在官方评测 harness 上测得，不是本仓库应用层的测量结果；目前全部标注为"待核对"。
+本仓库**不产生任何模型性能数字**，也没有对应用层做过效果评测（ADR-013）。论文报告的数字只登记在 `results/registry.yaml`，由它生成 [docs/RESULTS.md](docs/RESULTS.md)。那些数字是论文报告值，由官方模型在官方评测 harness 上测得，不是本仓库应用层的测量结果。
+
+2026-09-24 已对照 arXiv 2602.10090 **v3** 的 Table 4 逐格核对，registry 中 30 条（Base 与 AWM 两行 × 4B / 8B / 14B × 5 列）全部为"已核对"，核对记录见 [docs/verification/2026-09-24-paper-table4.md](docs/verification/2026-09-24-paper-table4.md)。发布的 Arctic-AWM 权重是否就是论文中 AWM 行所评测的模型，模型卡没有明说，registry 中按"推定"记录。
+
+应用层只做过单次链路演示：2026-09-24 用 DeepSeek 在官方 `e_commerce_33` 的同一个任务上执行过 `workbench agent run`（Phase 12 与 Phase 12.5 修复后各 1 次，后一次为追加授权 D10）、`awm agent` 与 `awm verify` 各 1 次，只证明链路打通，不构成评测（TASK_v2 N2）。经 vLLM 服务的 Arctic-AWM 链路与 smoke 训练还没有在 GPU 上执行（LIMITATIONS §1.1）。本仓库自测的数字只有工程事实（测试用例数、镜像大小、冷启动耗时等），都写明了测量方式。
 
 `make check-numbers` 会拦截 README 与 docs 中未登记的性能类数字。
+
+## 数据集署名（CC-BY-4.0）
+
+AgentWorldModel-1K，作者 Zhaoyang Wang, Canwen Xu, Boyi Liu, Yite Wang, Siwei Han, Zhewei Yao, Huaxiu Yao, Yuxiong He；配套论文 *Agent World Model: Infinity Synthetic Environments for Agentic Reinforcement Learning*（arXiv:2602.10090）；链接 https://huggingface.co/datasets/Snowflake/AgentWorldModel-1K ；许可证 [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)。本仓库不分发、不修改该数据集，只提供下载脚本；详见 [docs/UPSTREAM.md](docs/UPSTREAM.md) §5。
 
 ## 文档索引
 

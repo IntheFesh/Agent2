@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ ENV = {"OPENAI_API_KEY": "k", "AWM_SYN_OVERRIDE_MODEL": "m", "EMBEDDING_OPENAI_A
 
 
 def settings(tmp_path: Path) -> Settings:
-    return Settings(synth={"out_dir": tmp_path / "synth"})  # type: ignore[arg-type]
+    return Settings(synth={"out_dir": tmp_path / "synth", "budget": None})  # type: ignore[arg-type]
 
 
 class FakeAwm:
@@ -168,3 +169,95 @@ def test_validation_parsing_strips_ansi_colors(tmp_path: Path) -> None:
     log = "\x1b[1mPASSED: a\x1b[0m\n"
     d = parse_check_all(log, tmp_path).as_dict()
     assert d["environments_started"] == 1 and d["tools_total"] == 1
+
+
+LOCAL_SCENARIO = {
+    "name": "local_it_service_desk",
+    "description": "An internal IT service desk where employees open and track support tickets.",
+}
+
+
+def scenario_file(tmp_path: Path, *rows: dict[str, str]) -> Path:
+    path = tmp_path / "scenarios.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows or (LOCAL_SCENARIO,)), encoding="utf-8")
+    return path
+
+
+def test_scenario_file_starts_at_gen_task(tmp_path: Path) -> None:
+    """ADR-021: no embedding endpoint -> a hand-written local_ scenario, `gen scenario` skipped."""
+    run_dir = tmp_path / "synth" / "r3"
+    src = scenario_file(tmp_path)
+    fake = FakeAwm()
+    env = {"OPENAI_API_KEY": "k", "AWM_SYN_OVERRIDE_MODEL": "m"}  # no embedding key needed
+    r = SynthRunner(
+        settings(tmp_path), run_dir, scenarios=1, environ=env, command_runner=fake, scenario_file=src
+    )
+    plan = r.describe()
+    assert [s["name"] for s in plan["steps"]] == list(STEPS[1:])
+    assert plan["missing_env"] == [] and "EMBEDDING_OPENAI_API_KEY" not in plan["required_env"]
+    task_argv = plan["steps"][0]["argv"]
+    assert task_argv[task_argv.index("--input") + 1] == str((run_dir / "gen_scenario.jsonl").resolve())
+    r.execute(validate=False)
+    assert fake.calls == list(STEPS[1:])
+    assert (run_dir / "gen_scenario.jsonl").read_bytes() == src.read_bytes()
+    assert not (run_dir / "seed_scenario.jsonl").exists()
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["origin"] == "local-synth" and manifest["skipped_steps"] == ["scenario"]
+    assert manifest["scenario_file_sha256"] == hashlib.sha256(src.read_bytes()).hexdigest()
+
+
+def test_full_pipeline_still_needs_the_embedding_key(tmp_path: Path) -> None:
+    r = SynthRunner(settings(tmp_path), tmp_path / "synth" / "r", scenarios=1, environ={})
+    assert "EMBEDDING_OPENAI_API_KEY" in r.describe()["required_env"]
+    assert r.plan[0].name == "scenario"
+
+
+@pytest.mark.parametrize(
+    ("row", "message"),
+    [
+        ({"name": "e_commerce_33", "description": "an official name"}, "local_"),
+        ({"name": "local_Help Desk", "description": "not normalized"}, "local_"),
+        # official names are all <category>_<number>; two of them start with local_ too
+        ({"name": "local_search_1", "description": "official naming scheme"}, "suffix"),
+        ({"name": "local_x", "description": "d", "extra": "y"}, "expected"),
+        ({"name": "local_x", "description": " "}, "expected"),
+    ],
+)
+def test_scenario_file_is_validated(tmp_path: Path, row: dict[str, str], message: str) -> None:
+    with pytest.raises(SynthError, match=message):
+        SynthRunner(
+            settings(tmp_path),
+            tmp_path / "synth" / "r",
+            scenarios=1,
+            scenario_file=scenario_file(tmp_path, row),
+        )
+
+
+def test_scenario_file_count_and_existing_input(tmp_path: Path) -> None:
+    src = scenario_file(tmp_path)
+    with pytest.raises(SynthError, match="has 1 scenario"):
+        SynthRunner(settings(tmp_path), tmp_path / "synth" / "r", scenarios=2, scenario_file=src)
+    run_dir = tmp_path / "synth" / "r4"
+    run_dir.mkdir(parents=True)
+    (run_dir / "gen_scenario.jsonl").write_text('{"name": "local_other", "description": "d"}\n')
+    r = SynthRunner(
+        settings(tmp_path), run_dir, scenarios=1, environ=ENV, command_runner=FakeAwm(), scenario_file=src
+    )
+    with pytest.raises(SynthError, match="differs"):
+        r.execute(validate=False)
+
+
+def test_scenario_file_refuses_names_from_the_official_list(tmp_path: Path) -> None:
+    official = tmp_path / "official"
+    official.mkdir()
+    (official / "gen_scenario.jsonl").write_text(json.dumps(LOCAL_SCENARIO) + "\n", encoding="utf-8")
+    s = Settings(synth={"out_dir": tmp_path / "synth", "budget": None}, env={"dataset_dir": official})  # type: ignore[arg-type]
+    with pytest.raises(SynthError, match="official scenario name"):
+        SynthRunner(s, tmp_path / "synth" / "r", scenarios=1, scenario_file=scenario_file(tmp_path))
+    run_dir = tmp_path / "synth" / "r5"
+    other = {"name": "local_other_desk", "description": "d"}
+    src = scenario_file(tmp_path, other)
+    r = SynthRunner(s, run_dir, scenarios=1, environ=ENV, command_runner=FakeAwm(), scenario_file=src)
+    r.execute(validate=False)
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["official_name_check"].endswith("(1 names)")

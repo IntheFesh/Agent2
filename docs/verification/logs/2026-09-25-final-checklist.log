@@ -1,0 +1,183 @@
+# 2026-09-25 TASK.md §6 final acceptance checklist, run at the TASK_v2 wrap-up (TASK_v2 §4.4)
+# machine: Claude Code cloud container (Linux x86_64, no GPU); commit checked: 6663871a71804ecf5be71c36e99e03cadc82916d
+# every command ran with PYTHONPYCACHEPREFIX=$PWD/.cache/pycache and without DEEPSEEK_API_KEY in its environment
+# CI (item 5, second half) runs on the pushed head; its result is recorded on the phase9-verification -> main PR
+
+## 1. make setup && make doctor && make lint && make test && make check-numbers && make demo-mock
+### make setup
+git submodule update --init third_party/agent-world-model third_party/AgentFly
+uv sync --frozen
+Audited 140 packages in 1ms
+uv run python tests/fixtures/awm_mini/build_fixture.py
+cd train && uv lock --check
+Using CPython 3.12.3 interpreter at: /usr/bin/python3.12
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Resolved 244 packages in 3ms
+
+real	0m0.177s
+user	0m0.121s
+sys	0m0.050s
+make setup rc=0
+
+### make doctor
+uv run workbench doctor
+                                                  workbench doctor                                                  
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ check                       ┃ status ┃ detail                                                                    ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ python                      │ ok     │ 3.12 (AWM and AgentFly require 3.12)                                      │
+│ submodule:agent-world-model │ ok     │ pinned at 85e322f69279                                                    │
+│ submodule:AgentFly          │ ok     │ pinned at 1256586b1109                                                    │
+│ dataset                     │ ok     │ data/awm1k present                                                        │
+│ ports                       │ ok     │ env pool 18100-18199: 0 busy                                              │
+│ gpu                         │ warn   │ no nvidia-smi: GPU steps are UNVERIFIED-LOCAL (mock mode still works)     │
+│ env-vars                    │ ok     │ backend=mock_replay                                                       │
+│ llm                         │ ok     │ mock_replay fixture tests/fixtures/trajectories/e_commerce_33_basic.jsonl │
+└─────────────────────────────┴────────┴───────────────────────────────────────────────────────────────────────────┘
+make doctor rc=0
+
+### make lint (tail)
+uv run ruff check src tests
+All checks passed!
+uv run ruff format --check src tests
+115 files already formatted
+uv run mypy --strict src
+Success: no issues found in 72 source files
+make lint rc=0
+
+### make test (tail)
+305 passed, 102 warnings in 186.15s (0:03:06)
+make test rc=0
+
+### make check-numbers
+uv run workbench results check
+registry: 30 entries (0 unverified); scanned 26 files; 0 finding(s)
+make check-numbers rc=0
+
+### make demo-mock (a server: started in its own process group, driven in a browser, then stopped with SIGTERM)
+$ setsid nohup make demo-mock &   # then GET /healthz
+healthz: {"ok":true,"sessions":0,"llm_backend":"mock_replay"}
+server log (head):
+uv run workbench api serve --demo
+demo mode: open http://127.0.0.1:8080/ui/ and pick scenario mini_e_commerce
+INFO:     Started server process [1173]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+$ uv run --with playwright python scripts/demo_ui_check.py <shots> /opt/pw-browsers/chromium   # headless Chromium, playwright as an ephemeral overlay
+approval card: Tool: mini_e_commerce__add_item_to_cart write {   "product_offer_id": 11,   "quantity": 1 }
+final answer: I added 'Wireless Noise Cancelling Headphones A' ($189) to your cart (quantity 1).
+diff: table	rows	added pk	removed pk	changed pk | cart_items	1 → 2	[2]	[]	[]
+timeline items: 29
+demo_ui_check rc=0
+screenshots (not committed): demo_1_approval.png, demo_2_done_diff.png
+$ kill -TERM -- -<pgid of make demo-mock>
+server log (tail):
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1173]
+make: *** [Makefile:39: demo-mock] Error 143
+(Error 143 = the SIGTERM sent to stop the server.) Afterwards: 0 processes left in the process group; ports 8080 and 18100 closed.
+
+## 2. grep for evaluation calls
+$ grep -rnE "awm bench|--mode (bfcl|tau2|mcp_universe)" src scripts Makefile
+grep rc=1 (1 = no matches)
+
+## 3. registry sources and RESULTS.md
+registry entries: 30
+entries without source: []
+entries with verified != true: []
+keys of first entry: ['benchmark', 'evidence', 'id', 'metric', 'model', 'printed', 'source', 'unit', 'value', 'verified', 'verified_at', 'verified_by']
+source of first entry: {'arxiv_id': '2602.10090', 'version': 'v3', 'table': 4, 'page': 7, 'row': '4B / Base', 'column': 'BFCLv3 Leaderboard / Overall', 'transcribed_from': 'arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell'}
+RESULTS.md '待核对' occurrences: 0
+rc=0
+
+## 4. submodules pinned at the RECON SHAs, clean trees
+## RECON rows that record the pinned SHAs
+20:| AWM | https://github.com/Snowflake-Labs/agent-world-model | `85e322f69279e3b3325b7377ec3bab788514e9cb` | 2026-05-28 | submodule `third_party/agen
+21:| AgentFly | https://github.com/Agent-One-Lab/AgentFly | `1256586b1109ba8e0dc0f179f8515b4567d09df4` | 2026-05-06 | submodule `third_party/AgentFly`
+## git submodule status
+ 1256586b1109ba8e0dc0f179f8515b4567d09df4 third_party/AgentFly (heads/main)
+ 85e322f69279e3b3325b7377ec3bab788514e9cb third_party/agent-world-model (heads/main)
+## git -C third_party/agent-world-model status --porcelain | wc -l (expect 0)
+0
+## git -C third_party/AgentFly status --porcelain | wc -l (expect 0)
+0
+
+## 5. secret scan (the CI step, over all tracked files)
+$ uv run detect-secrets-hook --baseline .secrets.baseline $(git ls-files | grep -v -E '^(third_party/|uv\.lock$|train/uv\.lock$)')
+files scanned: 214
+detect-secrets rc=0
+
+## 6. git log: continuous small commits
+$ git log --oneline origin/main..HEAD | wc -l
+46
+subjects that are not Conventional Commits:
+(end of list)
+$ git log --oneline origin/main..HEAD
+6663871 docs: close the TASK_v2 round by splitting LIMITATIONS into unverified and verified
+1671021 docs(verification): record the owner's decision to leave Phase 15 for later (D22)
+3b43467 docs: add the Phase 15 GPU runbook for the owner's rented machine
+3fac63c feat(scripts): redact Phase 15 paste-back logs before they are shared
+0b0ec22 feat(llm): add `workbench serve probe` for native and text tool calls on vLLM
+deb8780 fix(train): compile flash-attn against the locked torch, not the newest release
+2198134 feat(train): run preflight probes and training in an allowlisted environment
+93f4145 feat(verify): run awm verify without handing it a key
+ec9c017 feat(synth): judge a step by its failed upstream requests, with a limit
+02c7a56 docs: forbid pushing the Docker image, which contains unlicensed AWM code
+e42d8b4 fix(docs): mark the submodule SHAs in the docker-smoke log for the secret scanner
+502c282 docs(verification): record Phase 14 evidence for Docker, interruption and the budget stop
+94a743e test(synth): hold the interrupted request so the interrupt test cannot race the runner
+c2a8a08 feat(synth): stop a synthesis run at a configurable budget (default CNY 5)
+3c3be06 fix(synth): stop a step's whole process tree on interrupt and redo unfinished steps cleanly
+5419a2c ci: add a docker-smoke job that builds and exercises the compose stack
+c0be5cc fix(compose): serve vLLM with the same arguments as the serving profile
+32f7371 docs(verification): record the owner's decisions after Phase 13
+0e1824a docs(verification): record the Phase 13 synthesis run
+1512d46 docs(verification): record the cost estimate for the Phase 13 synth run
+d7225d8 fix(synth): keep hand-written scenario names apart from official ones
+02832e5 chore(synth): price deepseek-flash from DeepSeek's official page
+b385891 feat(synth): let `synth run` start at gen task from a scenario file
+4c88de8 feat(serving): enable vLLM's hermes tool parser for Arctic-AWM-4B
+94bfda3 docs(verification): record the owner's decisions after Phase 12.5
+19f0fa2 docs(verification): record the Phase 12.5 confirming agent run
+f135189 fix(envs): start code-executing subprocesses with an env allowlist
+1d73039 fix(agent): send tool definitions once, via the native tools parameter
+c6c9f1b fix(llm): pass reasoning_content back on tool requests as DeepSeek documents
+ce94caf fix(gateway): stop the audit phone pattern from masking timestamps
+a535294 fix(gateway): use the route's HTTP method as a risk floor
+37fce26 docs: record Phase 12 results in LIMITATIONS, WALKTHROUGH, RECON and IDEAS
+59f0bf2 docs(verification): re-check the empty rule on writes and size the misgrading gap
+662790a docs(verification): record the single awm agent and awm verify runs
+47abb28 docs(verification): record the real-LLM workbench agent run and DeepSeek probes
+e6716cc docs(verification): record the empty-on-writes analysis and its evidence
+6abe9b6 fix(gateway): never label a successful write as empty
+cb52f20 docs: record Phase 11 results in LIMITATIONS, RECON, UPSTREAM and WALKTHROUGH
+f646086 fix(ci): allowlist the pinned dataset revision and fix lint in official tests
+50a455d test(integration): add official_data tests and pin the dataset revision
+d0d47a7 test(fixtures): reconcile the mini fixture with the official e_commerce_33 interface
+b6d0a8c fix(gateway): treat wrapped empty lists as empty and explain type errors
+7cf2b8b docs(verification): record the owner's decisions for Phases 11-15 and N5 status
+3059c35 docs: record dataset/model licenses, CC-BY-4.0 attribution and AWM issue draft
+9c10582 feat(results): verify registry against arXiv v3 Table 4 and record whole rows
+80f8ece docs(verification): record Phase 9 preflight and save TASK_v2
+
+## 7. LIMITATIONS lists every unverified item
+## U rows in LIMITATIONS §1.1
+18:| U1 | 用 vLLM 服务 Arctic-AWM | `configs/serving/arct
+19:| U3 | train 环境安装 | `train/pyproject.toml`、`tra
+20:| U4 | veRL 嵌套子模块与 Hydra 组合 | `check_over
+21:| U5 | smoke 训练运行 | `configs/train/smoke.yaml`、
+22:| U8 | `awm agent` / `awm verify` 各跑一次单任务 |
+23:| U9 | 合成流水线的 `gen scenario` 步骤 | `workbe
+## $ grep -rln --exclude-dir=__pycache__ UNVERIFIED-LOCAL src scripts configs docker-compose.yml Dockerfile train/pyproject.toml Makefile
+src/workbench/cli.py
+src/workbench/doctor.py
+src/workbench/train/launch.py
+src/workbench/train/preflight.py
+scripts/serve_vllm.sh
+configs/train/smoke.yaml
+configs/serving/arctic-awm-4b.yaml
+docker-compose.yml
+train/pyproject.toml
+## mapping: serve_vllm.sh, configs/serving, docker-compose.yml (gpu profile), cli.py serve -> U1; train/pyproject.toml -> U3; train/preflight.py (verl, hydra) -> U4; train/launch.py, configs/train/smoke.yaml, cli.py train -> U5; doctor.py gpu check -> GPU in general (U1/U5). U8 and U9 have no code marker and are listed in §1.1.

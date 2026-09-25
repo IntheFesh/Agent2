@@ -70,6 +70,42 @@ def doctor() -> None:
     raise typer.Exit(code=exit_code(results))
 
 
+@app.command()
+def verify(
+    input_dir: Path = typer.Option(..., "--input", help="`awm agent` output dir (has trajectory.json)."),
+    mode: str = typer.Option(
+        "code", "--mode", help="code: the dataset's pure-code verifier, no LLM; sql: verifier + LLM judge."
+    ),
+    verifier: Path | None = typer.Option(
+        None,
+        "--verifier",
+        help="Verifier file (default: gen_verifier.pure_code.jsonl / gen_verifier.jsonl in env.dataset_dir).",
+    ),
+    init_db: Path | None = typer.Option(None, "--init-db", help="Initial database (<input>/initial.db)."),
+    final_db: Path | None = typer.Option(None, "--final-db", help="Final database (<input>/final.db)."),
+    judge_model: str | None = typer.Option(
+        None, "--judge-model", help="sql mode: judge model (default AWM_SYN_OVERRIDE_MODEL)."
+    ),
+) -> None:
+    """Run `awm verify` once; no key reaches the verifier code (sql judge via the local proxy, ADR-025)."""
+    from workbench.verify import VerifyError, run_verify
+
+    try:
+        summary = run_verify(
+            get_settings(),
+            input_dir,
+            mode=mode,
+            verifier=verifier,
+            init_db=init_db,
+            final_db=final_db,
+            judge_model=judge_model,
+        )
+    except VerifyError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print_json(data=summary)
+
+
 def _env_client() -> RemoteEnvService:
     from workbench.envs.service import RemoteEnvService
 
@@ -220,28 +256,64 @@ def gateway_export_risk(
     dataset_dir: Path | None = typer.Option(None, "--dataset-dir"),
     out: Path = typer.Option(Path("data/risk_table.csv"), "--out"),
 ) -> None:
-    """Classify every tool of every scenario (offline, by tool name) into a CSV for human review."""
+    """Classify every tool of every scenario offline (name + route HTTP method) into a CSV for review.
+
+    ``heuristic_risk`` is the name-only result before the HTTP-method floor (ADR-015), so the CSV
+    also shows what the floor changed.
+    """
     import csv
 
-    from workbench.envs.catalog import build_catalog
-    from workbench.gateway.policy import PolicyConfig, classify
+    from workbench.envs.catalog import build_catalog, iter_route_methods
+    from workbench.gateway.policy import METHOD_FLOOR, PolicyConfig, classify
 
     settings = get_settings()
     policy = PolicyConfig.load(settings.gateway.policy_file)
     directory = dataset_dir or settings.env.dataset_dir
+    methods = dict(iter_route_methods(directory))
     out.parent.mkdir(parents=True, exist_ok=True)
-    rows = 0
+    rows = heuristic_read_writes = final_read_writes = 0
     with out.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["scenario", "tool", "risk", "source", "reason", "requires_approval"])
+        writer.writerow(
+            [
+                "scenario",
+                "tool",
+                "http_method",
+                "risk",
+                "source",
+                "reason",
+                "requires_approval",
+                "heuristic_risk",
+            ]
+        )
         for scenario in build_catalog(directory):
             for tool in scenario.tool_names:
-                c = classify(tool, "", policy, scenario.name)
+                method = methods.get(scenario.name, {}).get(tool)
+                c = classify(tool, "", policy, scenario.name, http_method=method)
+                heuristic = classify(tool, "", policy, scenario.name)
+                if method in METHOD_FLOOR:
+                    heuristic_read_writes += heuristic.level == "read"
+                    final_read_writes += c.level == "read"
                 writer.writerow(
-                    [scenario.name, tool, c.level, c.source, c.reason, c.level in policy.require_approval]
+                    [
+                        scenario.name,
+                        tool,
+                        method or "",
+                        c.level,
+                        c.source,
+                        c.reason,
+                        c.level in policy.require_approval,
+                        heuristic.level,
+                    ]
                 )
                 rows += 1
-    console.print(f"wrote {rows} rows to {out} (offline: names only; live sessions add descriptions)")
+    console.print(
+        f"wrote {rows} rows to {out} (offline: names and route methods; live sessions add descriptions)"
+    )
+    console.print(
+        f"POST/PUT/PATCH/DELETE tools graded read: {heuristic_read_writes} by name alone, "
+        f"{final_read_writes} with the HTTP-method floor"
+    )
 
 
 @serve_app.command("vllm-cmd")
@@ -259,6 +331,29 @@ def serve_vllm_cmd(
         typer.echo("\n".join(cmd))
     else:
         typer.echo(shlex.join(cmd))
+
+
+@serve_app.command("probe")
+def serve_probe(
+    base_url: str | None = typer.Option(None, "--base-url", help="Default: llm.base_url."),
+    model: str | None = typer.Option(None, "--model", help="Default: llm.model."),
+    only: str | None = typer.Option(None, "--only", help="native | text (default: both)."),
+) -> None:
+    """Send one native-tools request and one `awm agent` text-protocol request to the service (U1)."""
+    from workbench.llm.probe import PROBES, ProbeError, failed, run_probe
+
+    if only is not None and only not in PROBES:
+        console.print(f"[red]--only must be one of {', '.join(PROBES)}[/red]")
+        raise typer.Exit(code=2)
+    llm = get_settings().llm
+    update = {k: v for k, v in (("base_url", base_url), ("model", model)) if v}
+    try:
+        report = _run(run_probe(llm.model_copy(update=update), PROBES if only is None else (only,)))
+    except ProbeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print_json(data=report)
+    raise typer.Exit(code=1 if failed(report) else 0)
 
 
 @agent_app.command("run")
@@ -362,33 +457,56 @@ def synth_run(
     num_tasks: int = typer.Option(10, "--num-tasks"),
     verifier_mode: str = typer.Option("sql", "--verifier-mode"),
     execute: bool = typer.Option(False, "--execute", help="actually call the LLM API (default: dry-run)"),
+    scenario_file: Path | None = typer.Option(
+        None,
+        "--scenario-file",
+        help="hand-written gen_scenario.jsonl (local_ names): start at `gen task`, skip `gen scenario`",
+    ),
 ) -> None:
     """Plan (default) or execute AWM's gen steps with checkpoints, LLM cache, ledger and validation."""
     import os
 
-    from workbench.synth.ledger import Ledger
+    from workbench.synth.ledger import Ledger, load_prices
     from workbench.synth.proxy import create_proxy_app
-    from workbench.synth.runner import ProxyThread, SynthError, SynthRunner
+    from workbench.synth.runner import ProxyThread, SynthError, SynthInterrupted, SynthRunner
 
     settings = get_settings()
     try:
         runner = SynthRunner(
-            settings, out, scenarios=scenarios, num_tasks=num_tasks, verifier_mode=verifier_mode
+            settings,
+            out,
+            scenarios=scenarios,
+            num_tasks=num_tasks,
+            verifier_mode=verifier_mode,
+            scenario_file=scenario_file,
         )
         if not execute:
             console.print_json(data=runner.describe())
             return
         s = settings.synth
         upstream = os.environ.get(s.upstream_base_url_env) or "https://api.openai.com/v1"
+        currency, prices = load_prices(s.pricing_file)
         app = create_proxy_app(
             upstream_base_url=upstream,
             upstream_api_key=os.environ.get(s.upstream_api_key_env),
             cache_dir=out / "llm_cache",
             ledger=Ledger(out / "ledger.jsonl"),
+            prices=prices,
+            budget=s.budget,  # ADR-023
+            currency=currency,
         )
         with ProxyThread(app, s.proxy_host, s.proxy_port) as base:
             result = runner.execute(proxy_base=base)
         console.print_json(data=result)
+        for name, step in result["steps"].items():
+            if step.get("status") == "done_with_failures":  # ADR-024
+                console.print(
+                    f"[yellow]step {name}: {step['failed_requests']} LLM request(s) ended in an upstream "
+                    f"error ({step['failed_by_status']}); its output misses those parts[/yellow]"
+                )
+    except SynthInterrupted as exc:  # ADR-022: the step's processes are already stopped
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(code=130) from exc
     except SynthError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
@@ -397,13 +515,11 @@ def synth_run(
 @synth_app.command("validate")
 def synth_validate(run_dir: Path) -> None:
     """Run `awm env reset_db` + `awm env check_all` on a synthesized run and write the report."""
-    import os
-
+    from workbench.subprocess_env import generated_code_env
     from workbench.synth.runner import default_command_runner, validate_run
 
-    env = dict(os.environ)
-    env.setdefault("PYTHONPYCACHEPREFIX", str(Path(".cache/pycache").resolve()))
-    report = validate_run(run_dir, default_command_runner, env)
+    # Both run generated code and call no LLM: allowlisted variables only (ADR-019).
+    report = validate_run(run_dir, default_command_runner, generated_code_env())
     console.print_json(data=report.as_dict())
 
 
@@ -411,12 +527,16 @@ def synth_validate(run_dir: Path) -> None:
 def train_preflight(profile: Path | None = typer.Option(None, "--profile")) -> None:
     """Check GPU, CUDA/torch/vLLM/veRL, config keys and data for the smoke profile."""
     from workbench.doctor import exit_code
-    from workbench.train.preflight import run_preflight
+    from workbench.subprocess_env import train_env
+    from workbench.train.preflight import env_runner, run_preflight
     from workbench.train.profile import TrainProfile
 
     s = get_settings()
     results = run_preflight(
-        TrainProfile.load(profile or s.train.smoke_config), s.upstream.agentfly_dir, s.train.project_dir
+        TrainProfile.load(profile or s.train.smoke_config),
+        s.upstream.agentfly_dir,
+        s.train.project_dir,
+        run=env_runner(train_env(passthrough=s.train.env_passthrough)),  # what launch will see
     )
     table = Table(title="train preflight (smoke)")
     for col in ("check", "status", "detail"):
@@ -433,15 +553,18 @@ def train_launch(
     execute: bool = typer.Option(False, "--execute", help="run it (needs a GPU); default prints the plan"),
 ) -> None:
     """Launch the SMOKE profile in the separate train env (subprocess). Output is marked NO_RESULTS."""
+    from workbench.subprocess_env import train_env
     from workbench.train.launch import LaunchError, launch
-    from workbench.train.preflight import run_preflight
+    from workbench.train.preflight import env_runner, run_preflight
     from workbench.train.profile import TrainProfile
 
     s = get_settings()
     prof = TrainProfile.load(profile or s.train.smoke_config)
-    checks = run_preflight(prof, s.upstream.agentfly_dir, s.train.project_dir)
+    env = train_env(passthrough=s.train.env_passthrough)  # ADR-026
+    checks = run_preflight(prof, s.upstream.agentfly_dir, s.train.project_dir, run=env_runner(env))
     try:
-        console.print_json(data=launch(prof, s.train.out_dir, s.train.project_dir, checks, execute=execute))
+        plan = launch(prof, s.train.out_dir, s.train.project_dir, checks, execute=execute, env=env)
+        console.print_json(data=plan)
     except LaunchError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc

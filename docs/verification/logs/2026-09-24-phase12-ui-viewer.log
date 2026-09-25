@@ -1,0 +1,97 @@
+# 2026-09-24 Phase 12 step 3: open the real 'awm agent' output in the UI trajectory viewer (no LLM involved)
+# UI served by the offline demo API (uv run workbench api serve --demo, mock LLM); headless Chromium via Playwright
+# (uv run --with playwright: an ephemeral overlay, not an app dependency; browser /opt/pw-browsers/chromium-1194).
+# Input files: the untrimmed data/p12/awm-agent/e_commerce_33_task_0/trajectory.json and the workbench trace of step 2.
+
+## script
+"""Load real outputs into the UI trajectory viewer (client-side only; no LLM involved)."""
+import sys
+from playwright.sync_api import sync_playwright
+
+traj, trace, shots = sys.argv[1], sys.argv[2], sys.argv[3]
+with sync_playwright() as p:
+    b = p.chromium.launch(executable_path="/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+    page = b.new_page(viewport={"width": 1400, "height": 900})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto("http://127.0.0.1:8080/ui/")
+    page.click("button[data-tab=viewer]")
+    for label, path in (("awm agent trajectory.json", traj), ("workbench trace.jsonl", trace)):
+        page.set_input_files("#traj-file", path)
+        page.wait_for_selector("#viewer p", timeout=10000)
+        page.wait_for_timeout(300)
+        text = page.inner_text("#viewer")
+        print(f"=== {label}: {path}")
+        print("steps rendered (.viewer-step):", page.locator("#viewer .viewer-step").count(),
+              "| timeline items:", page.locator("#viewer li").count())
+        print(text[:1500])
+        page.screenshot(path=f"{shots}/viewer_{label.split()[0]}.png", full_page=True)
+    print("page errors:", errors or "none")
+    b.close()
+
+## command
+$ PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers uv run --with playwright python viewer_check.py <trajectory.json> <trace.jsonl> <shots_dir>
+
+## output (verbatim)
+Downloading playwright (46.0MiB)
+ Downloading playwright
+Installed 4 packages in 6ms
+=== awm agent trajectory.json: data/p12/awm-agent/e_commerce_33_task_0/trajectory.json
+steps rendered (.viewer-step): 2 | timeline items: 0
+AWM trajectory · scenario e_commerce_33 · task 0 · 2 iterations
+
+Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under $200 to my cart in quantity 1.
+
+#1 list_tools null
+Available MCP Tools (39 tools):
+================================================================================
+
+1. mcp_tool_mcp_server_search_products
+   Description: Search products with filters and sorting
+   Search products by text and optional filters like category, Prime, rating, price, and sort order.
+   ### Responses:
+   **200**: Successful Response (Success Response)
+   Content-Type: application/json
+   **Example Response:**
+   ```json
+   {
+   "products": [
+   {
+   "product": {
+   "id": 1,
+   "title": "Title",
+   "is_prime_eligible": true,
+   "is_subscription_eligible": true,
+   "cre
+#2
+final: I'll search for the product with the appropriate filters. <｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="call_tool"> {"tool_name": "mcp_tool_mcp_server_search_products", "arguments": "{\"query\": \"wireless noise cancelling headphones\", \"max_price\": 200, \"sort_by\": \"average_rating\", \"limit\": 20}"} </｜｜DSML｜｜ parameter> </｜｜DSML｜｜ invoke> </｜｜DSML｜｜ calls>
+=== workbench trace.jsonl: data/p12/runs/98f642235e74/trace.jsonl
+steps rendered (.viewer-step): 0 | timeline items: 22
+workbench trace · 22 events
+
+session_created
+node intake
+llm
+node plan
+llm
+node e_commerce_33__search_products
+tool_call e_commerce_33__search_products ok
+llm
+node e_commerce_33__list_product_offers
+tool_call e_commerce_33__list_product_offers ok
+llm
+node e_commerce_33__add_item_to_cart
+approval_requested e_commerce_33__add_item_to_cart
+approval_granted e_commerce_33__add_item_to_cart
+tool_call e_commerce_33__add_item_to_cart ok
+llm
+node act
+memory_saved headphone_budget
+memory_saved prefers_top_rated
+memory_saved cart_id
+node verify
+final
+page errors: none
+
+# screenshots were inspected locally (not committed): the header, 2 steps (#1 list_tools with its response, #2 final)
+# and the 22-event workbench timeline render as expected; no page errors.

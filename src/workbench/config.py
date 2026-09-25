@@ -80,7 +80,8 @@ class LLMSettings(BaseModel):
     backoff_max_s: float = 8.0
     stream: bool = True
     temperature: float = 0.6
-    max_tokens: int = 2048
+    # Includes thinking tokens on DeepSeek; ~8.5x the largest completion measured in Phase 12 (ADR-018).
+    max_tokens: int = 8192
     mock_fixture: Path = Path("tests/fixtures/trajectories/e_commerce_33_basic.jsonl")
     # Demo only: rewind the mock script for every new session so the demo can be repeated.
     mock_reset_per_session: bool = False
@@ -90,7 +91,8 @@ class AgentSettings(BaseModel):
     max_steps: int = 12
     repeat_call_threshold: int = 3
     no_change_threshold: int = 4
-    token_budget: int = 60_000
+    # A full max_steps run on a 39-tool official scenario fits (measured, ADR-018).
+    token_budget: int = 240_000
     wall_clock_s: float = 300.0
     plan_retries: int = 2
     checkpoint_db: Path = Path("data/agent/checkpoints.sqlite")
@@ -113,12 +115,21 @@ class SynthSettings(BaseModel):
     proxy_port: int = 8095
     upstream_base_url_env: str = "OPENAI_BASE_URL"
     upstream_api_key_env: str = "OPENAI_API_KEY"
+    # Budget stop (ADR-023): once the run's ledger cost, in the pricing file's currency, reaches this
+    # value the proxy refuses to forward and the current step fails. None disables it.
+    budget: float | None = 5.0
+    # Requests of one step that may end in an upstream error after every retry (ADR-024). More fail
+    # the step (resumable); 1..max_failed_requests mark it done_with_failures, never done.
+    max_failed_requests: int = Field(default=0, ge=0)
 
 
 class TrainSettings(BaseModel):
     project_dir: Path = Path("train")
     smoke_config: Path = Path("configs/train/smoke.yaml")
     out_dir: Path = Path("data/train_runs")
+    # Variable names passed to the train env on top of its allowlist (ADR-026), e.g. a name the
+    # allowlist drops that a machine turns out to need. Values are never logged.
+    env_passthrough: list[str] = Field(default_factory=list)
 
 
 class Settings(BaseSettings):

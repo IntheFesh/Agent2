@@ -271,6 +271,8 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 - 旁证（非一手来源，不作为核实依据）：服务端 WebSearch 的摘要显示该论文存在 v2 版本，且摘要中出现的 3 个数值与任务书 §1.4 一致（对应 registry 中 `bfclv3.overall.8b.*`、`tau2.pass1.14b.awm`、`mcp_universe.success.8b.*`）。
 - 论文的其他格子（τ²-bench 分领域、MCP-Universe 分类别、其余尺寸的基座值）均未能读取，列在 registry 的 `pending` 中。
 
+> **2026-09-24 更新（TASK_v2 Phase 10）**：网络放开后已对照 arXiv v3 Table 4 逐格核对，registry 扩充为 30 条并全部 `verified: true`，`pending` 已清空。见 `docs/verification/2026-09-24-paper-table4.md`。
+
 ## 6. 许可证调查（R6）
 
 完整表格见 `docs/UPSTREAM.md` §3。摘要：
@@ -357,6 +359,8 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 8. 官方训练配方是否以非公开形式存在：公开渠道未找到（§4）。
 9. OpenEnv 示例对数据集许可证（CC-BY-4.0）的陈述、以及其夹具中的工具清单，都是第三方信息，未对照 HF 原文核实。
 
+> **2026-09-24 更新（TASK_v2 Phase 10–11）**：第 1、2、3、9 项已核实（`docs/verification/` 下的 `2026-09-24-paper-table4.md`、`2026-09-24-licenses.md`、`2026-09-24-model-cards.md`、`2026-09-24-dataset.md`）；数据集许可证确为 CC-BY-4.0，OpenEnv 抓取的 7 个工具名与官方 `e_commerce_33` 一致。第 4 项仍成立（AWM 仍无 LICENSE）。第 7 项仍为 UNVERIFIED-LOCAL。
+
 ---
 
 ## 10. 后续阶段补充核实（Phase 1 起，按阶段追加）
@@ -438,3 +442,228 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - `verl/utils/checkpoint/megatron_checkpoint_manager.py:481-506,612-633`。
 
   前两个是参考用的展开文件，不被 Hydra 加载；后者只影响 Megatron 路径（smoke 走 FSDP）。静态键检查会容忍这些标记；权威校验是在 train 环境里由 Hydra 实际组合配置（UNVERIFIED-LOCAL）。
+
+### Phase 10–11（TASK_v2，2026-09-24）：官方数据集与外部事实
+
+- 官方数据集 revision `dde80a0283fe781bdc51656bce57063dc5650213`；字段布局与 §1.6 一致：`gen_scenario`（`name`、`description`）、`gen_tasks`（`scenario`、`tasks`）、`gen_db`（`scenario`、`db_schema`、`db_path`）、`gen_sample`（`scenario`、`tables_count`、`inserts_count`、`sample_data`）、`gen_spec`（`scenario`、`api_spec`）、`gen_envs`（`scenario`、`db_path`、`full_code`）、两个 verifier 文件（`scenario`、`task_idx`、`task`、`verification`）。
+- 两个 verifier 文件含重复的 (scenario, task_idx) 行；AWM 用 `find_scenario_entry` 取第一条匹配（`awm/tools.py:456-472`，调用处 `awm/core/verify.py:383-384`）。
+- 官方环境的返回形态与校验错误文本（在真实启动的 `e_commerce_33` 上实测，`docs/verification/2026-09-24-dataset.md` §3）：
+  - 列表结果包在对象里：`{"products": [], "total": 0}`、`{"cart_id": 1, "items": []}`、`{"payment_methods": [...]}`；删除类工具返回 `{"success": bool}`；
+  - 新的校验错误文本：`Input validation error: 'abc' is not of type 'integer'`（来自 MCP SDK 的 jsonschema 校验，与 §10 Phase 2 记录的 `is not one of` / `is a required property` 同源）；
+  - `e_commerce_33` 的 39 个工具都没有枚举参数，`sort_by` 是自由字符串。
+- 由此修订 ADR-007 为 ADR-014（网关的空结果判定），并按官方接口修正迷你夹具（`docs/verification/2026-09-24-fixture-reconciliation.md`）。
+- Arctic-AWM 模型卡：三个模型的 `chat_template.jinja` 相同，工具调用格式为 Qwen3 的 `<tool_call>` JSON 块；`max_position_embeddings` 为 40960（`docs/verification/2026-09-24-model-cards.md`）。
+
+### Phase 12（TASK_v2，2026-09-24）：真实 LLM 链路
+
+- DeepSeek API（官方文档 2026-09-24 16:55–16:57 UTC 用 curl 读取；`GET /models` 实测）：
+  - 模型名 `deepseek-flash`（`/models` 返回 `name: DeepSeek-V4.1-Flash`，`context_window` 1048576，`max_output_tokens` 393216）；OpenAI 格式 base URL 为 `https://api.deepseek.com`（价格页）。`/models` 中没有 `deepseek-chat`。
+  - 思考模式默认开启，默认强度 high；用 `{"thinking": {"type": "disabled"}}` 或 `reasoning_effort: "none"` 关闭（`/guides/thinking_mode`、`/api/create-chat-completion`）。思考模式下 `temperature` 不生效（不报错）。
+  - 文档：带 `tools` 的请求必须在后续请求中回传 `reasoning_content`，否则返回 400。**实测不一致**：P1、P3 探针中省略 `reasoning_content` 的请求返回 200（2026-09-24 17:02 UTC）。
+  - `usage` 中 `completion_tokens` 包含 `completion_tokens_details.reasoning_tokens`，另有 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`（P3 原始响应）。
+  - `max_completion_tokens` 不在 API 参考中；实测被接受但被忽略（P4，OpenAI Python SDK 2.38.0：要求 16，实际输出 536 个 token）。
+  - 流式响应中原生 `tool_calls` 按 `index` 分片、最后一个 chunk 带 `usage`，本仓库 `openai_compat.py` 的解析与之兼容（P1、P2）。
+  - 证据：`docs/verification/2026-09-24-llm-chain.md` §1–2，`docs/verification/logs/2026-09-24-phase12-doctor-probe.log`。
+- AWM `awm agent` 的 LLM 调用（本阶段核实）：
+  - `generate_response` 发送 `max_completion_tokens=config.max_tokens` 与 `temperature`（`awm/core/agent.py:367-372`）；非 vLLM 端点时工具结果以 user 消息 `Tool response:\n…` 回传（`awm/core/agent.py:362-365`）；只读取 `message.content` 并用 `<tool_call>` 正则解析（`awm/core/agent.py:383-384`，正则 `:132`）。
+  - `--scenario` + `--task_id` 与 `--mcp_url` 可以同时给：任务从 `--tasks_path` 查出（`awm/core/agent.py:398-407`），`--mcp_url` 存在时不自动起服、也不准备数据库（`:433-458`），`trajectory.json` 仍记录 scenario 与 task_id。
+  - **上游缺陷**：自动起服时 `_prepare_database` 把工作库建成 `<output_dir>/final.db`（`awm/core/server.py:70-82`），结束时 `run_agent` 又 `shutil.copy2` 到同一路径（`awm/core/agent.py:596-598`），抛 `shutil.SameFileError`。已在不调用 LLM 的情况下调用上游函数复现（`docs/verification/logs/2026-09-24-phase12-awm-agent.log`）。
+  - 自动起服的 `start_server_process`（`awm/core/server.py:174-195`）不传 `--temp_server_path`，服务代码写到 `--envs_path` 所在目录（`awm/core/server.py:134-138`）。
+- AWM `awm verify --mode sql`：裁判调用 `temperature=1.0, max_completion_tokens=4096`（`awm/core/verify.py:302-310`）；执行期间把两个数据库 chmod 为 0o444，之后恢复（`:111-117`，实测权限已恢复）；`--init_db_path` / `--final_db_path` 优先于运行目录中的默认路径（`:367-368`）；结果写到 `<input>/verify.sql.json`（`:436`）。
+- 单次运行中观察到的模型输出：`awm agent` 第 1 轮 DeepSeek 按 `<tool_call>` 格式调用 `list_tools`，第 2 轮在纯文本中输出 `<｜｜DSML｜｜ calls>…` 标记，AWM 解析出 0 个调用并结束循环（`docs/verification/2026-09-24-llm-chain.md` §4）。这是一次运行的观察，不是对模型的评价。
+
+### Phase 12.5（2026-09-24）：修复阶段用到的上游事实
+
+- FastAPI 0.115.12（app 环境实际安装版本）：
+  - 默认 operationId 由 `generate_unique_id` 生成：`f"{route.name}{route.path_format}"`，`\W` 替换为 `_`，再加 `_<method>`（`fastapi/utils.py:179-184`）；`route.name` 默认为端点函数名，可被装饰器的 `name=` 覆盖（`fastapi/routing.py:490`）；`path_format` 来自 starlette 的 `compile_path`，去掉路径参数的转换器（`fastapi/routing.py:491`）。
+  - OpenAPI 的 operationId = `route.operation_id or route.unique_id`（`fastapi/openapi/utils.py:237,248`；`unique_id` 见 `fastapi/routing.py:501`）。
+- fastapi-mcp 0.4.0：工具名取 OpenAPI 的 operationId，没有 operationId 的操作被跳过（`fastapi_mcp/openapi/convert.py:50-63`，工具构造在 `:263`）。
+- AWM 服务端按场景名建立字典，同名场景取最后一条记录（`third_party/agent-world-model/awm/core/server.py:98-99`）。
+- 官方数据集 revision `dde80a0` 的 `gen_envs.jsonl`：1000 个场景全部能被 `ast` 解析；35062 个路由全部写成 `@app.<method>(..., operation_id="...")` 且为字面量；按方法统计 GET 16688、POST 13819、PATCH 3605、DELETE 574、PUT 376（`docs/verification/logs/2026-09-24-phase12.5-risk-floor.log`）。
+- DeepSeek 文档（2026-09-24 18:00 UTC 重新读取，思考模式指南中英文版与 16:57 读取时一致）：带 `tools` 的请求须回传此前各轮的 `reasoning_content`（含没有工具调用的轮次），否则返回 400；不带 `tools` 的请求无需回传、传了也被忽略；流式为 `delta.reasoning_content`。API 参考中请求消息的 `reasoning_content` 字段只被描述为 Chat Prefix Completion（Beta）的输入（`https://api-docs.deepseek.com/api/create-chat-completion`），与指南的说法不一致；本仓库按指南实现（ADR-017）。
+- DeepSeek-V4.1-Flash 开源仓库（`huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash` @ `dba1be0`，MIT）：`encoding/encoding.py` 是官方提示词编码脚本，`encode_messages(messages, thinking_mode, reasoning_effort, ...)`；工具定义挂在 system 消息的 `tools` 字段上渲染（`encoding/README.md` "Tool calling"）；带工具时不丢弃历史轮次的思考内容（README "Thinking mode"）。模型原生的工具调用格式是 `<｜DSML｜ calls>` / `<｜DSML｜ invoke>` / `<｜DSML｜ parameter>`（README "V4.1 changes"），这解释了 Phase 12 中 `awm agent` 第 2 轮的输出。用该脚本与 `tokenizer.json` 离线重算 Phase 12 探针的请求，与 DeepSeek 返回的 `prompt_tokens` 完全一致（`docs/verification/logs/2026-09-24-phase12.5-act-tokens.log`）。
+- vLLM v0.19.0（tag commit `2a69949`，本阶段从 GitHub 稀疏克隆只读）：请求带 `tools` 却没有 `tool_choice` 时，校验器把它设为 `"auto"`（`vllm/entrypoints/openai/chat_completion/protocol.py:640-643`）；未配置 tool parser（且非 Mistral / Harmony）时，`"auto"` 在未开启 `--enable-auto-tool-choice` 的情况下返回错误 `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`，其它非 `none` 取值要求 `--tool-call-parser`（`vllm/entrypoints/serve/render/serving.py:197-221`）；否则 `tools` 以 `tool_dicts` 交给 chat template（同文件 `:223-247`）。对照：RECON §10 Phase 4 "没有开启自动工具选择时，模型输出原样作为 content 返回"只适用于不带 `tools` 的请求。
+- 子进程环境（ADR-019，AWM @ `85e322f`）：
+  - **env server 的启动与环境继承**：
+    - `awm.core.server` 先在自己的 `os.environ` 中设置 `PORT` 与 `DATABASE_PATH`（`awm/core/server.py:157-158`），再用 `os.system(f"{sys.executable} {server_code_path} 2>&1 | tee {log_path}")` 启动生成的 server（`:163`）。因此需要 `PATH` 找到 `tee`，解释器用绝对路径。
+    - 生成代码的入口按 `os.environ.get('HOST', '<--host>')`、`os.environ.get('PORT', <--port>)` 取地址（模板在 `:112-116`）。
+  - **`awm env check_all` 与 gen 步骤中执行生成代码的位置**：
+    - 每个环境用 `subprocess.Popen([sys.executable, '-m', 'awm.core.server', ...], start_new_session=True)` 启动，没有传 `env=`，子进程继承 check_all 的环境（`awm/core/env.py:161-172`）。
+    - `gen verifier` 用 `exec(python_code, namespace)` 在进程内测试生成的 verifier（`awm/core/verifier.py:104`）。
+  - **`awm verify`**：
+    - `execute_sql_verifier` / `execute_code_verifier` 在本进程中 `exec` verifier 代码，namespace 中直接提供了 `os`（`awm/core/verify.py:104-126`、`:151-174`）；
+    - sql 模式随后用 `resolve_llm_config()` 从环境取 key 并调用裁判（`:419-421`，`run_llm_judge` 在 `:230-302`，`resolve_llm_config` 在 `awm/tools.py:386-432`）。
+  - **`awm agent --scenario`**：用 `start_server_process` 起服，`Popen` 没有传 `env=`（`awm/core/server.py:174-195`，调用在 `awm/core/agent.py:433-446`）。
+  - **上游自带的隔离**：AWM 自己的 MCP 客户端在连接时用 `isolated_mcp_env()` 临时删掉非白名单变量。它按前缀匹配 `HOME`、`USER`、`PATH`、`LANG`、`TERM`、`SHELL`、`PWD`、`TMPDIR`、`TMP`、`TEMP`，另外保留 `PYTHONPATH`、`VIRTUAL_ENV` 与 conda 变量（`awm/tools.py:118-139`，使用处 `awm/core/agent.py:278`）。它只作用于客户端进程，不作用于 server。
+  - **进程组中额外出现的变量**：scikit-learn 1.9.1 在 import 时设置 `KMP_DUPLICATE_LIB_OK`、`KMP_INIT_AT_FORK`（`sklearn/__init__.py:56,60`）。AWM 启动器经 `awm.tools` → mcp-agent 0.2.6 `mcp_agent/workflows/embedding/embedding_base.py:6` import 了它，所以 env server 的子进程带有这两个非密钥变量。
+  - **官方数据**：对 revision `dde80a0` 全部 1000 个 `full_code` 做正则扫描，读取的环境变量只有 `PORT`、`HOST`、`DATABASE_PATH`，没有整体访问 `os.environ`（`docs/verification/logs/2026-09-24-phase12.5-subprocess-env.log` §3）。
+  - **sympy 1.14.0**（train 锁定版本，只读 wheel，sha256 `e091cc3e…`）：`sympify` 的文档写明它使用 `eval`，不应用于未经清洗的输入（`sympy/core/sympify.py:138-139`；`eval` 在 `sympy/parsing/sympy_parser.py:905`）。
+
+### Phase 12.5 报告之后（2026-09-24）：vLLM `hermes` tool parser（ADR-020，D11）
+
+- **`Snowflake/Arctic-AWM-4B` @ `437dfa0e12702901eb41c30e9326a90996549650`**（HF API 2026-09-24 查询，仍是最新提交）：
+  - `chat_template.jinja`：sha256 `c2bc6549…`，md5 `da05f6b8a81932c7cf5f26eb545d4417`，与模型卡核对记录一致。
+    - 第 1-11 行：带 `tools` 时，system prompt 列出 `<tools></tools>`，并要求输出 `<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>`；
+    - 第 57-75 行：历史中的 `tool_calls` 渲染为 `<tool_call>\n{"name": "…", "arguments": …}\n</tool_call>`；
+    - 第 76-86 行：工具结果以 `<tool_response>` 包裹；
+    - 第 89-94 行：生成提示；`enable_thinking` 为 false 时写入空的 `<think>` 块（第 91-93 行）。
+  - `tokenizer_config.json`（sha256 `443bfa62…`）：`added_tokens_decoder` 中 151657 `<tool_call>`、151658 `</tool_call>`、151665/151666 `<tool_response>`/`</tool_response>`、151667/151668 `<think>`/`</think>` 都是 `special: false`；文件中没有内嵌 chat template。
+- **vLLM v0.19.0**（`2a69949`，稀疏克隆加入了 `vllm/tool_parsers/**`）：
+  - **`vllm/tool_parsers/hermes_tool_parser.py`**：
+    - `Hermes2ProToolParser` 的起止标签与正则在 `:61-66`；
+    - `adjust_request` 只在 `request.tools` 非空且 `tool_choice != "none"` 时设 `skip_special_tokens=False`（`:80-87`）；
+    - 非流式 `extract_tool_calls`：没有 `<tool_call>` 时原样返回 `content`；否则把每段 JSON 的 `name`/`arguments` 转成调用，第一个标签之前的文本作为 `content`（`:89-139`）；
+    - 流式用 `_extract_tool_call_jsons`、`_extract_tool_name`、`_extract_tool_args` 按标签与 `"name"`/`"arguments"` 取值（`:160-208`）；
+    - 该版本不查词表中的标签 id。
+  - **注册与 CLI**：
+    - `vllm/tool_parsers/__init__.py:61-64`：`"hermes"` → `hermes_tool_parser.Hermes2ProToolParser`；
+    - `vllm/tool_parsers/abstract_tool_parser.py:68-73`：基类 `adjust_request` 在请求不带 `tools` 时直接返回；
+    - `vllm/entrypoints/openai/cli_args.py:108-122`：`enable_auto_tool_choice`、`tool_call_parser` 两个前端参数；`:363-364`：只开前者会报错。
+  - **不带 `tools` 的请求**：
+    - `chat_completion/protocol.py:175-181`：`tool_choice` 默认 `"none"`；`:642-643`：只有带 `tools` 且未指定时才改成 `"auto"`；
+    - `serve/render/serving.py:534-550`：`tool_choice == "none"` 时不调用 parser 的 `adjust_request`；
+    - `engine/serving.py:881-950`：`_parse_tool_calls_from_content` 的自动解析分支条件是 parser 已配置、自动选择已开启、`tool_choice` 为 `"auto"` 或 `None`（`:920-924`），不检查 `request.tools`。所以不带 `tools` 却显式传 `tool_choice: null` 的请求**会**被解析，只有保持默认 `"none"` 的请求不受影响；
+    - `chat_completion/serving.py`：
+      - `:1386-1403`：非流式先调用上面的函数；
+      - `:1476-1479`：`tool_choice` 为空或 `"none"` 时消息原样返回 `content`；
+      - `:532-535`、`:559-571`：流式只有 `_should_stream_with_auto_tool_parsing` 为真才创建 parser；
+      - `:1743-1757`：该函数要求 `request.tools` 非空。
+- **AWM `awm agent` 的请求**：`awm/core/agent.py:367-381` 只含 `model`、`messages`、`max_completion_tokens`、`temperature`，vLLM 模式再加 `extra_body`（`add_generation_prompt`、`min_tokens`、`chat_template_kwargs`），不带 `tools`，也不带 `tool_choice`（OpenAI SDK 不发送未给出的参数），非流式。
+- **`docker-compose.yml`**：`vllm` 服务的命令写死，不读 serving profile。2026-09-24 按 D16 同步为与 `vllm_command(profile)` 相同的参数（`--host 0.0.0.0` 除外），由单测保证一致。
+
+### Phase 13（2026-09-24）：合成流水线的入口与外部服务
+
+- **`gen scenario` 依赖 embedding**（AWM @ `85e322f`，`awm/core/scenario.py`）：
+  - 去重用 `text-embedding-3-large` 计算相似度，阈值等配置在 `:40-43`；
+  - `EMBEDDING_OPENAI_API_KEY` 用断言强制要求（`:63`），随后创建 embedding 客户端（`:83-86`）。
+- **`gen task` 以场景文件为输入**（`awm/core/task.py`）：
+  - 配置：`input` 的注释是 "scenario description file"（`:13`），`num_tasks=10`、`shuffle=True`、`limit=None`、`max_retry=4`（`:15-19`）；
+  - 检查：文件必须存在（`:24`），必须设置 `AWM_SYN_OVERRIDE_MODEL`（`:26-29`）；
+  - 请求：每个场景 1 个，`temperature` 1.0、`max_tokens` 32000（`:35-56`）；只用 `name` 与 `description`（`:44-45`）；
+  - 重试：任务数不足或解析失败时，整步最多重试 4 次（`:66-111`）；
+  - 输入输出：加载输入、打乱、截断到 `limit`（`:126-129`）；每个场景输出 `{"scenario", "tasks"}`（`:94-97`）。
+  - `python -m awm.cli gen task --help` 中 `--input` 标为必填。
+- **官方 `data/awm1k/gen_scenario.jsonl`**（revision `dde80a0`）：1000 条，每条恰好是 `{"name": str, "description": str}`；description 长度 61–211 词，中位数 162。
+- **AWM 的 LLM 客户端**（`awm/gpt.py`）：
+  - 非流式调用 `chat.completions.create`（`:171`），把 `max_tokens` 改名为 `max_completion_tokens`（`:160-164`）；DeepSeek 接受但忽略这个参数（Phase 12 探针 P4）。
+  - 超时 600 s，每个请求最多尝试 3 次（`:36`、`:168-204`）。
+- **各 gen 步骤的请求上限与整步重试**：都是每次尝试一批请求，最多 5 次尝试（`max_retry=4`）。失败后先用一次"错误摘要"请求总结错误，再把摘要带进下一次尝试。
+  - `gen db`：主请求 `max_tokens` 128000（`awm/core/db.py:153-154`）；错误摘要 10000（`summarize_errors`，`:28-52`）；
+  - `gen sample`：主请求 128000（`awm/core/sample.py:156-157`）；错误摘要 8000（`:34-58`）；
+  - `gen spec`：128000（`awm/core/spec.py:56-57`）；
+  - `gen env`：主请求 128000（`awm/core/env.py:408-409`）；错误摘要 16000（`:71-102`）；
+  - `gen verifier`：每个任务 32000（`awm/core/verifier.py:200-201`）；错误摘要 1024（`:205-226`）。
+- **DeepSeek**（2026-09-24 20:43 UTC 查阅，均为官方来源）：
+  - `GET /models` 返回 `deepseek-flash`、`deepseek-v4-pro`；
+  - 文档站点 `sitemap.xml` 中的 API 页面为 create-chat-completion、create-completion、create-response、create-file、list-files、retrieve-file、delete-file、get-user-balance、list-models，没有 embeddings；
+  - 价格页与 16:55 UTC 读取时相同（见 `configs/pricing.yaml` 与 `docs/verification/cost-ledger.md` §1）。
+- **执行中核实的事实**（2026-09-24 20:58–21:05 UTC 那次真实运行）：
+  - `awm env check_all` 判定"started"的标准：MCP 连接成功且工具列表非空（`awm/tools.py:201-220`，`async_wait_for_server` → `check_mcp_server`）。
+  - `gen env` 与 `check_all` 的测试 server 用 `start_new_session=True` 启动（`awm/core/env.py:161-172`），不属于调用者的进程组；中断编排进程后仍然存活，临时目录 `/tmp/env_test_*` 也会留下。
+  - AWM 的 `GPTClient` 在第一次请求后把完整请求参数（含 prompt，不含 key）和响应写进日志（`awm/gpt.py:174-177`），所以 `data/synth/<run_id>/logs/` 中有完整 prompt；这些日志不入库。
+  - DeepSeek 响应的 `usage` 含 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens` 与 `completion_tokens_details.reasoning_tokens`。这次运行中前者全部为 0；思考 token 占全部输出 token 的 82,675 / 130,867。
+  - `awm.tools.tools_token_count` 对 `deepseek-flash` 取不到 tiktoken 编码，回退为字符数（`awm/tools.py:353-358`），所以 `gen env` 日志中的 "average tokens per environment" 实际是字符数。
+
+### Phase 14（2026-09-24）：中断续跑、预算熔断与 Docker 冒烟用到的事实
+
+- **AWM 各 gen 步骤怎样写输出**（AWM @ `85e322f`）：
+  - 结束时一次覆盖写出：
+    - `gen scenario`（`awm/core/scenario.py:629`）、`gen task`（`task.py:142`）、`gen db`（`db.py:259`）、`gen sample`（`sample.py:282`）、`gen spec`（`spec.py:120`）；
+    - `gen env`（`env.py:568`）。它自带的续跑只保留 `full_code` 长度大于 10 的已有结果（`load_existing_env_results`，`:120-131`），重新测试通过的才跳过（`:334-370`）。
+  - `gen verifier` 每处理一批就追加写入（`_save_pending_results`，`verifier.py:172-176`，每批之后调用，`:456`）。续跑时：
+    - 读取已有结果（`:145-156`）；
+    - 执行已有代码，只保留执行通过的（`:260-295`）；
+    - 其余重新生成，追加在文件后面（`:300-308`）。
+  - `gen sample` 插入样例数据之前先重建数据库（`sample.py:210-212` 调用 `db.py:64-72` 的 `create_sqlite_database`，旧文件先删除），所以重跑不会在旧数据上重复插入。
+  - `awm verify` 用 `find_scenario_entry` 取**第一条**匹配的行（`awm/tools.py:456-472`；调用处 `awm/core/verify.py:384-385`）。
+- **AWM 测试 server 与临时目录**（`awm/core/env.py`）：
+  - 临时目录由 `tempfile.mkdtemp(prefix=f"env_test_{unique_id}")` 创建（`:148`）；
+  - server 以 `start_new_session=True` 启动（`:161-172`），正常路径上用 `killpg` 回收（`:212-227`）；
+  - 临时目录在 `finally` 中删除（`:230-235`）。AWM 没有注册任何信号处理函数或 `atexit`（在 `awm/` 中搜索 `signal.signal`、`atexit` 均无结果），所以被 SIGTERM 结束时这段 `finally` 不会执行。
+- **AWM `GPTClient` 的错误处理**（`awm/gpt.py`）：
+  - `_call_async` 共尝试 `max_retry_num` 次，默认 3 次（`:36`、`:168`）；
+  - `BadRequestError`、`InternalServerError` 与其它异常都在间隔 3 秒、6 秒后重试（`:179-204`）；
+  - 最后返回一个内容为空的 refusal completion（`:205-206`，构造见 `:103-131`），不抛出异常；
+  - 并发上限默认 64（`:36`）。
+- **openai SDK 2.38.0**（app 环境 `.venv`）：
+  - 402 映射为普通的 `APIStatusError`（异步客户端的 `_make_status_error`，`openai/_client.py:1081-1112`）；
+  - SDK 自己只重试 408、409、429 与 5xx，以及带 `x-should-retry` 头的响应（`_should_retry`，`openai/_base_client.py:795-826`）；默认重试 2 次（`openai/_constants.py:10`）。
+- **uvicorn 0.40.0 的停止过程**：
+  - 先停止接收新连接，再等待在途请求完成（`uvicorn/server.py:265-281`）；
+  - `timeout_graceful_shutdown` 默认为 `None`，即不限时（`uvicorn/config.py:217`）。
+  - `ProxyThread.__exit__` 最多等 5 秒（`src/workbench/synth/runner.py`）。因此 runner 退出时，代理里在途的请求会完成并记入账本。这是 ci run 27 中第 3 个请求被记账的原因（ADR-022）。
+- **信号投递实测**（Claude Code 云端容器）：
+  - 场景：主线程阻塞在 `waitpid()`，另一个线程持续执行 Python 代码；
+  - 40 次试验中，SIGTERM 的处理函数都在子进程结束之前运行；
+  - 从发信号到处理函数运行最长 0.274 s。
+  - 结论：进程收到的信号在这个环境里会打断主线程，但反应时间不是即时的。
+- **Docker**：
+  - 本机：`dockerd` 29.3.1 能启动。拉取 `python:3.12-slim` 时，`registry-1.docker.io` 返回 `429 Too Many Requests`（日志 `docs/verification/logs/2026-09-24-phase14-docker-smoke.log` §1）。
+  - 沙箱说明（`/root/.ccr/README.md` "docker build / docker run"）：容器内的进程连不到出口代理，也不信任它的 CA。绕过需要在 Dockerfile 里安装沙箱 CA，而这项改动只对这个沙箱有意义。
+  - GitHub 托管 runner：`ubuntu-24.04` 镜像 `20260920.314.1`，Docker 28.0.4，Compose 2.38.2（docker-smoke run 1 的日志）。
+
+### Phase 15 前置修复（2026-09-25）：`awm verify`、训练环境与上游错误
+
+- **`awm verify` 的两种模式**（AWM @ `85e322f`，`awm/core/verify.py`）：
+  - `Config` 的字段在 `:37-49`：`input`、`init_db_path`、`final_db_path`、`mode`（默认 `sql`）、`verifier_path`、`verifier_code_path`；
+  - `pre_process` 只在 sql 模式下检查 LLM 相关的环境变量（`:51-80`）；
+  - 只有 sql 模式会调用裁判（`:416-433`）。裁判的地址、key 与模型由 `resolve_llm_config` 从环境读取（`awm/tools.py:386-437`），请求设置 `temperature=1.0`、`max_completion_tokens=4096`（`:302-310`）；
+  - code 模式执行 verifier，结果只取 `complete` 或 `others`（`:151-198`）；
+  - 默认的 verifier 路径是 `./outputs/gen_verifier.pure_code.jsonl` 与 `./outputs/gen_verifier.jsonl`（`:376-379`）。官方数据集 revision `dde80a0` 同时提供这两个文件（`data/awm1k/`，大小分别约 45 MB 与 248 MB）；
+  - `awm verify` 读取输出目录中的 `trajectory.json` 与两个数据库（`:350-373`），结果写到 `verify.<mode>.json`（`:436`）。
+- **上游错误的重试层次**（ADR-024）：
+  - openai SDK 2.38.0：异步客户端把 402 映射为 `APIStatusError`（`openai/_client.py:1081-1112`）；`_should_retry` 只重试 408、409、429、5xx 与带 `x-should-retry` 头的响应（`openai/_base_client.py:795-826`）；默认重试 2 次（`openai/_constants.py:10`）；
+  - AWM `GPTClient`：共尝试 3 次，最后返回空的 refusal completion（`awm/gpt.py:168-206`）。
+- **训练栈读取的环境变量**（ADR-026）：
+  - AgentFly @`1256586`：
+    - `agentfly/__init__.py:16-47` 读取 `XDG_CACHE_HOME`、`AGENT_DATA_DIR`、`AGENT_CONFIG_DIR`、`TOOL_ERROR_AS_OBSERVATION`，并自己设置 `TOKENIZERS_PARALLELISM=false`、`VLLM_CONFIGURE_LOGGING=1`；
+    - `agents/agent_base.py:155-171` 读取 `REWARD_DECOMPOSITION`、`REWARD_DECOMPOSITION_GAMMA`；
+    - `resources/containers/ray_container_resource.py:47` 读取 `AGENTFLY_RAY_GET_DEFAULT_TIMEOUT_SEC`；
+    - 检索、ALFWorld、enroot、代码沙箱等工具另有自己的变量，smoke 配置不用这些工具。
+  - veRL fork @`001f000`（`Agent-One-Lab/verl`，按 HTTPS 只读检出到 scratch 后检索 `os.environ` / `os.getenv`）：
+    - 出现最多的是 `VERL_LOGGING_LEVEL`（81 处）；
+    - 其余包括 `RANK`、`LOCAL_RANK`、`WORLD_SIZE`、`MASTER_ADDR`、`MASTER_PORT`、`NCCL_*`、`CUDA_*`、`TORCH_*`、`CUBLAS_WORKSPACE_CONFIG`、`FLASH_ATTENTION_DETERMINISTIC`，以及跟踪器相关的 `WANDB_ENTITY`、`MLFLOW_*`、`SWANLAB_API_KEY`、`VOLC_ACCESS_KEY_ID`、`VOLC_SECRET_ACCESS_KEY`。
+  - smoke profile 的 `trainer.logger` 为 `['console']`（`configs/train/smoke.yaml`），不需要任何跟踪器的 key。
+
+### Phase 15 runbook（2026-09-25）：GPU 步骤用到的事实
+
+`docs/runbooks/phase15-gpu.md` 中的命令、参数与预期输出依据下面的源码与实验（均在无 GPU 的容器中完成）。
+
+- **uv 0.8.17**：
+  - **镜像与锁文件**：在只锁定 `six==1.16.0` 的最小项目中设置 `UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple`。`uv sync --frozen` 仍从锁文件记录的 `files.pythonhosted.org` 下载；`uv sync --locked` 改从镜像解析，然后报 `The lockfile at uv.lock needs to be updated, but --locked was provided`（锁文件记录的 registry 是 `https://pypi.org/simple`）。所以 runbook 不设镜像，下载慢时用代理。
+  - **`extra-build-dependencies`**：最小项目锁定 `six==1.16.0`，一个本地源码包（setuptools，构建时把 `six.__version__` 写进文件）的额外构建依赖写成 `"six"` 时，构建环境里是 six 1.17.0；写成 `{ requirement = "six", match-runtime = true }` 时是 1.16.0。命令为 `uv lock` 后 `uv sync --frozen`（ADR-027）。
+  - **PyPI 上的 torch**：2026-09-25 查询 `https://pypi.org/pypi/torch/json`，最新版本为 2.14.0，`requires_dist` 含 `cuda-toolkit[…]==13.0.3`；`train/uv.lock` 锁定 torch 2.10.0。改为 `match-runtime` 后，`cd train && uv lock --check` 退出码为 0，`train/uv.lock` 的 md5 修改前后相同。
+  - `uv run` 的 `--no-sync` 对应环境变量 `UV_NO_SYNC`（`uv run --help`）。
+- **flash-attn 2.8.3.post1**（PyPI 源码包，只读解压到 scratch，`setup.py`）：
+  - 顶层 import torch（`:22-23`），并按构建环境中 torch 的版本拼出 GitHub 预编译 wheel 的地址（`:440-472`）；
+  - `FLASH_ATTENTION_FORCE_BUILD=TRUE` 跳过下载直接编译（`:61`，`:484-486`）；
+  - `FLASH_ATTN_CUDA_ARCHS` 默认 `80;90;100;120`（`:70`），`NVCC_THREADS` 默认 4（`:124`）；
+  - 要求 `CUDA_HOME` 与 nvcc ≥ 11.7（`:168-175`）；
+  - 未设 `MAX_JOBS` 时按 `min(CPU 核数/2, psutil 可用内存 GB/9)` 计算（`:513-526`，注释称每个任务峰值约 8–9 GB）；
+  - `setup_requires` 为 packaging、psutil、ninja（`:568-572`）。
+- **vLLM v0.19.0**（commit `2a69949`，稀疏检出到 scratch）：
+  - 在 CUDA 上使用自带的 `vllm.vllm_flash_attn`，外部 `flash_attn` 包只在 ROCm 上使用（`vllm/v1/attention/backends/fa_utils.py:18-44`）；另有一处按 `find_spec` 可选导入（`vllm/model_executor/layers/rotary_embedding/common.py:136-140`）。所以 15A 可以不装 flash-attn。
+  - 使用统计默认开启，`VLLM_NO_USAGE_STATS=1`、`VLLM_DO_NOT_TRACK=1` 或 `DO_NOT_TRACK=1` 可以关闭（`vllm/usage/usage_lib.py:52-66`，`vllm/envs.py:663-666`）。
+  - 启动日志：`"auto" tool choice has been enabled.`（`vllm/parser/parser_manager.py:202`，由 `OpenAIServingChat.__init__` 在启动时调用，`vllm/entrypoints/openai/chat_completion/serving.py:132`）；`GPU KV cache size: … tokens` 与 `Maximum concurrency for … tokens per request`（`vllm/v1/core/kv_cache_utils.py:1319-1329`，数字带千位分隔符）。
+  - `ChatCompletionRequest` 接受 `max_completion_tokens`（`vllm/entrypoints/openai/chat_completion/protocol.py:164`）、`min_tokens`（`:199`）、`add_generation_prompt`（`:216`）与 `chat_template_kwargs`（`:263`）；`--api-key` 默认为空，即不校验（`vllm/entrypoints/openai/cli_args.py:242`）。
+  - 没有 `--enable-auto-tool-choice` 时，带 `tools` 的请求返回 `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`（`vllm/entrypoints/serve/render/serving.py:205-215`）。
+- **AWM `awm agent`**（`awm/core/agent.py` @ `85e322f`）：
+  - `Config` 的默认值 `max_iterations` 30、`temperature` 1.0、`max_tokens` 2048（`:49-68`）；
+  - system prompt（`:88-127`）、文本解析器（`:130-167`）、`generate_response`（`:339-386`，请求参数 `:367-379`）；
+  - 地址含 `localhost` 与 `v1` 时附加 vLLM 参数（`:417`），并以 `tool` 角色回传工具结果（`:355-361`）；key 取 `OPENAI_API_KEY`，没有时为 `EMPTY`（`awm/tools.py:429`）；
+  - 客户端为默认设置的 `AsyncOpenAI`（`:472-475`）；
+  - 轨迹条目的字段见 `:511-517`（最终回答）与 `:560-569`（工具调用），结束时打印 `Run outputs saved to: …`（`:601`）。
+  - `workbench serve probe` 的 text 探针在运行时调用这些函数，没有把 AWM 的 prompt 复制进本仓库（ADR-003）。
+- **huggingface_hub 1.32.0**（应用环境）：
+  - 装有 `hf_xet`；`HF_HUB_DISABLE_XET=1` 关闭 Xet 协议（`huggingface_hub/constants.py:342`，`utils/_runtime.py:155-157`）；
+  - 下载时只有 revision 不是提交哈希才写 `refs/<revision>`（`file_download.py:723-728`），离线加载按 `refs/main` 查找（`:1584-1590`），所以 runbook 下载 Qwen3-0.6B 时不指定哈希。
+- **veRL fork @`001f000`**：
+  - 版本文件为 `0.8.0.dev`；
+  - console logger 每个 step 打印一行 `step:N - key:value - …`（`verl/utils/logger/aggregate_logger.py:26-31,49-51`），由 `ray_trainer.py:1784` 在每个训练 step 调用；
+  - 该提交（"remove printing in ray trainer"）只删除了 `ray_trainer.py` 中的 8 行打印。
+- **veRL 嵌套子模块的 HTTPS 克隆**：对 AgentFly @`1256586` 的本地克隆（`.gitmodules` 中 `submodule.verl.url` 为 `git@github.com:Agent-One-Lab/verl.git`）原样执行 `git -C <克隆> -c url."https://github.com/".insteadOf="git@github.com:" submodule update --init verl`：输出 `Submodule path 'verl': checked out '001f000ae2e4cf05bb94c01427898cbe68961141'`，耗时约 3 秒；随后 `submodule status verl` 行首为空格，`verl/verl/version/version` 为 `0.8.0.dev`，`git status --porcelain` 与 `git diff .gitmodules` 都没有输出。`-c` 设置经 `GIT_CONFIG_PARAMETERS` 传给 `git submodule` 启动的克隆进程，所以不需要修改 `.gitmodules`。 <!-- pragma: allowlist secret (a git commit SHA quoted from git's output) -->
+- **AgentFly @`1256586`**：`.gitignore` 包含 `build/`、`dist/`、`*.egg-info/`、`__pycache__/`（第 13、25、27、37 行），editable 安装不会让子模块出现未跟踪文件。
+- **模型与数据**：
+  - Hugging Face API（2026-09-25）：`Snowflake/Arctic-AWM-4B` @`437dfa0` 的权重是两个 safetensors 分片，约 5.0 GB 与 3.8 GB；`Qwen/Qwen3-0.6B` 的 `main` 为 `c1899de289a04d12100db370d81485cdf75e47ca`。
+  - 官方数据集中 `e_commerce_33` 任务 0 的纯代码 verifier：174 行，只 import `re` 与 `sqlite3`，以 `mode=ro` 打开数据库，没有写 SQL，也没有文件、网络或子进程调用。
+  - 数据集 `gen_sample.jsonl` 中电话号码的写法：`555-111-2222`、`+1-312-555-0100`、`+12125550123`（`scripts/redact_paste.py` 按这些写法识别电话）。

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from workbench.gateway.audit import AuditLogger, AuditRecord, redact, redact_text, summarize
 from workbench.gateway.errors import is_empty_payload, normalize
 from workbench.gateway.ratelimit import RateLimiter, TokenBucket
@@ -34,6 +36,48 @@ def test_redacts_email_phone_card() -> None:
     assert "2026-09-24" in out  # dates are not phone numbers
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "2026-09-24T17:05:31.506430",  # ISO 8601 with microseconds (AWM's created_at)
+        "2026-09-24T17:05:31.506430+00:00",
+        "2026-09-24 17:05:31.506430",  # space separator
+        "2026-09-23 17:05:16",  # SQLite CURRENT_TIMESTAMP format in the official DB rows
+        "17:05:31.506430",
+        '{"created_at": "2026-09-24T17:05:31.506430", "updated_at": "2026-09-24T17:05:31.506430"}',
+    ],
+)
+def test_timestamps_are_not_redacted(text: str) -> None:
+    # observed in the Phase 12 audit log: "17:05:31.506430" became "17:05:[PHONE]" (ADR-016)
+    assert redact_text(text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "call +1 555 123 4567",
+        "(555) 123-4567",
+        "555-123-4567",
+        "555.123.4567",
+        "13800138000",
+        "+44 20 7946 0958",
+        "tel:+15551234567",
+        "Tel:5551234567",
+        "phone: 555-123-4567",
+        "reached at 555-123-4567 on 2026-09-24T17:05:31.506430",
+    ],
+)
+def test_real_phone_numbers_are_still_redacted(text: str) -> None:
+    out = redact_text(text)
+    assert "[PHONE]" in out and "123" not in out and "7946" not in out and "0013" not in out
+
+
+def test_summary_keeps_timestamps_of_a_real_tool_result() -> None:
+    # add_item_to_cart result from the Phase 12 run on official e_commerce_33
+    result = {"cart_item": {"id": 4, "cart_id": 1, "created_at": "2026-09-24T17:05:31.506430"}}
+    assert "2026-09-24T17:05:31.506430" in summarize(result, 300)
+
+
 def test_redact_nested_and_summary() -> None:
     data = {"user": {"email": "a@b.co", "phones": ["13812345678"]}, "qty": 2}
     red = redact(data)
@@ -63,7 +107,35 @@ def test_empty_is_not_error() -> None:
         r = normalize("t", False, text)
         assert r.status == "empty" and r.error is None, text
     assert normalize("t", False, '[{"id": 1}]').status == "ok"
-    assert not is_empty_payload('{"items": []}')
+
+
+def test_wrapped_empty_lists_are_empty() -> None:
+    # shapes returned by the official e_commerce_33 environment (2026-09-24)
+    for text in ['{"products": [], "total": 0}', '{"cart_id": 1, "items": []}', '{"items": []}']:
+        assert is_empty_payload(text), text
+    for text in [
+        '{"success": false}',
+        '{"products": [{"id": 1}], "total": 1}',
+        '{"product": {"id": 0}, "aggregates": null, "active_offers": []}',
+        '{"total": 0}',
+    ]:
+        assert not is_empty_payload(text), text
+
+
+def test_writes_are_never_empty() -> None:
+    # successful write whose result has only empty lists (official social_media_4, 2026-09-24)
+    text = '{"user_id": 1, "hide_subreddit_ids": [], "nsfw_blur_enabled": true}'
+    assert normalize("patch_hidden_subreddits", False, text).status == "empty"  # as a query
+    assert normalize("patch_hidden_subreddits", False, text, read_only=False).status == "ok"
+    assert normalize("clear_cart", False, "[]", read_only=False).status == "ok"
+    err = normalize("clear_cart", True, "Input validation error: 'x' is a required property", read_only=False)
+    assert err.status == "error"
+
+
+def test_type_violation_gets_expected_type() -> None:
+    r = normalize("get_product_by_id", True, "Input validation error: 'abc' is not of type 'integer'")
+    assert r.error is not None and r.error.code == "invalid_arguments"
+    assert r.error.details["expected_type"] == "'integer'"
 
 
 def test_enum_violation_gets_allowed_values() -> None:

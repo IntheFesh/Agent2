@@ -1,0 +1,28 @@
+# commands run 2026-09-24 (UTC) in the Claude Code cloud container (Linux x86_64, no GPU)
+$ for u in <urls>; do curl -sS -o /dev/null -w "%{http_code}" --max-time 20 $u; done
+https://huggingface.co/api/datasets/Snowflake/AgentWorldModel-1K -> 200
+https://arxiv.org/abs/2602.10090v3 -> 200
+https://github.com -> 400
+
+$ env -u HF_TOKEN uv run hf download Snowflake/AgentWorldModel-1K gen_scenario.jsonl --repo-type dataset --local-dir <scratch>
+path=<scratch>/gen_scenario.jsonl
+$ wc -l gen_scenario.jsonl
+1000 gen_scenario.jsonl
+$ ls -la gen_scenario.jsonl
+-rw-r--r-- 1 root root 1338786 Sep 24 05:39 gen_scenario.jsonl
+
+$ docker info
+Server:
+failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory
+$ which nvidia-smi
+(not found)
+$ env | grep -cE "^(DEEPSEEK|OPENAI)_API_KEY="
+0
+
+$ setsid dockerd &   # the daemon was not running; started manually as root
+$ docker info | grep -E "Server Version|Storage Driver"
+ Server Version: 29.3.1
+ Storage Driver: overlayfs
+
+$ curl -sSL https://api-docs.deepseek.com/zh-cn/quick_start/pricing  (price table excerpt, see preflight.md)
+200

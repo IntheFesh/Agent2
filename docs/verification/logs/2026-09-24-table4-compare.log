@@ -1,0 +1,15 @@
+# 2026-09-24 13:17 UTC, Claude Code cloud container (Linux x86_64)
+$ curl -sSL https://arxiv.org/abs/2602.10090     -> 200 (submission history v1..v3, comments "Accepted to ICML 2026")
+$ curl -sSL https://arxiv.org/pdf/2602.10090v3   -> 200, 9601950 bytes, sha256 419b30a8f19edc92cf268d194923cf5f29b755c161e6f22672b5bfa05b5f84d5
+$ curl -sSL https://arxiv.org/html/2602.10090v3  -> 200, 939090 bytes,  sha256 ae2316ad884dbfc785359a1234736df8a3cc6fb1a943406224cfb643bbb96b1a
+
+# step 1: parse HTML <figure class="ltx_table"> #4 ("Table 4: Results across BFCLv3, ...")
+#         keep rows whose method is Base or AWM -> 18 rows
+# step 2: compare with TASK_v2 section 2.2 (all columns)
+cells compared 96 mismatches 0
+# step 3: pypdf (python 3.12) text of PDF page 7; per row, re.findall(r'\d+\.\d{2}')
+pages 43
+table4 pages (0-based) [5, 6]
+rows 18 cells 96 html-vs-pdf mismatching rows: []
+# note: a naive contiguous-string search found only 6/18 rows because pypdf drops spaces
+#       between bold cells (e.g. "63.9539.38"); token comparison above is the reliable check.

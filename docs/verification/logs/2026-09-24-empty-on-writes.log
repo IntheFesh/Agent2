@@ -1,0 +1,19 @@
+# 2026-09-24 ~16:41 UTC, Claude Code cloud container (Linux x86_64, no GPU); no LLM involved
+# static scan over data/awm1k/gen_envs.jsonl (regex over @app.<method>(... response_model=X ...))
+{'write_routes': 18374, 'write_routes_list_and_scalars_only': 1647, 'model_unparsed': 568, 'e33_write_routes': 18}
+e_commerce_33 at-risk write routes: []
+('content_platform_1', 'cleanup_watch_later_long_videos', 'post', {'removed_count': 'int', 'remaining_videos': 'List[WatchLaterRemainingVideoModel]'})
+('social_media_4', 'patch_hidden_subreddits', 'patch', {'user_id': 'int', 'hide_subreddit_ids': 'List[int]', 'nsfw_blur_enabled': 'bool', 'updated_at': 'str'})
+('media_streaming_1', 'add_tracks_to_playlist', 'post', {'added': 'List[PlaylistAddTrackItem]'})
+
+# runtime reproduction (EnvManager on data/awm1k, isolated run dir .cache/adr14-runs), BEFORE the fix
+started healthy 24
+isError False response {   "user_id": 1,   "hide_subreddit_ids": [],   "nsfw_blur_enabled": true,   "updated_at": "2026-09-24T16:41:03.279952Z" }
+normalize -> empty
+db changed: True  user_content_preferences (rows 1 -> 1, changed [1]); all other tables unchanged
+
+# AFTER the fix
+$ uv run pytest -q -m official_data
+5 passed, 185 deselected, 46 warnings in 47.26s
+$ make test
+190 passed, 83 warnings in 57.04s

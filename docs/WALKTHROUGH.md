@@ -1,6 +1,6 @@
 # WALKTHROUGH — 学习路线
 
-面向仓库主人。按"环境 → 合成 → 服务 → 网关 → 智能体 → 训练循环"的顺序，每一步给出命令、预期输出和建议阅读的源文件。所有命令在仓库根目录执行，除第 3、6 步中标注 UNVERIFIED-LOCAL 的部分外，都能在 CPU + mock LLM 下运行。下文的"预期输出"摘自开发沙箱中的实际运行（2026-09-24），会话 ID、端口等随每次运行变化。
+面向仓库主人。按"环境 → 合成 → 服务 → 网关 → 智能体 → 训练循环"的顺序，每一步给出命令、预期输出和建议阅读的源文件。所有命令在仓库根目录执行，除第 3、6 步中标注 UNVERIFIED-LOCAL 的部分外，都能在 CPU + mock LLM 下运行。下文的"预期输出"摘自开发沙箱中的实际运行（2026-09-24），会话 ID、端口等随每次运行变化。第 3.1、5.1、5.2 小节是用 DeepSeek 做的**单次链路演示，不构成评测**：需要 `DEEPSEEK_API_KEY`（外部 API，会产生费用），输出是 2026-09-24 那一次运行的原文节选。
 
 准备：
 
@@ -20,7 +20,9 @@ make doctor     # 缺少官方数据集和 GPU 只会给出 warn，不算失败
 │ llm                         │ ok     │ mock_replay fixture …                 │
 ```
 
-在没有官方数据集的情况下，下面统一使用手写的迷你场景 `tests/fixtures/awm_mini`（按 AWM 数据格式编写的 7 个工具的迷你电商，不是官方数据）。
+下面默认使用手写的迷你场景 `tests/fixtures/awm_mini`（按 AWM 数据格式编写的 7 个工具的迷你电商，不是官方数据；工具名与参数已于 2026-09-24 与官方 `e_commerce_33` 对账，见 `docs/verification/2026-09-24-fixture-reconciliation.md`）。
+
+如果已用 `make data` 下载官方数据集，可以把命令中的 `mini_e_commerce` 换成官方场景（例如 `e_commerce_33`），并去掉 `--dataset-dir` 参数：`workbench env up e_commerce_33` 启动后 `list_tools` 返回 39 个工具（`docs/verification/2026-09-24-dataset.md`）。
 
 先读：`TASK.md`（任务书）、`CLAUDE.md`（规则摘要）、`docs/RECON.md`（上游事实与行号）、`docs/ARCHITECTURE.md`。
 
@@ -47,7 +49,7 @@ workbench env down wt1
 
 ```
 │ scenario        │ tools │ tasks │ tables │
-│ mini_e_commerce │ 7     │ 2     │ 3      │
+│ mini_e_commerce │ 7     │ 2     │ 6      │
 
 │ session │ scenario        │ state   │ url                    │ tools │
 │ wt1     │ mini_e_commerce │ healthy │ http://127.0.0.1:1810… │ 7     │
@@ -60,10 +62,10 @@ stopped wt1
 阅读：
 
 - `src/workbench/envs/awm_adapter.py`：如何调用 AWM 建库与启动 server，为什么必须显式传 `--db_path`、`--temp_server_path`、`--output_dir`（`docs/RECON.md` §1）；
-- `src/workbench/envs/manager.py`：进程组启动与 `killpg`、健康检查截止时间、排队信号量、空闲回收；
+- `src/workbench/envs/manager.py`：进程组启动与 `killpg`、健康检查截止时间、排队信号量、空闲回收；server 执行生成代码，只拿到白名单中的环境变量（`src/workbench/subprocess_env.py`，ADR-019）；
 - `src/workbench/envs/snapshot.py`：快照、恢复、按主键的表级 diff；
 - `src/workbench/envs/service.py`、`envs/http.py`：本地与远程两种 env 服务；
-- 测试：`tests/unit/test_env_manager.py`、`tests/integration/test_env_real_awm.py`（真实启动 AWM server）。
+- 测试：`tests/unit/test_env_manager.py`、`tests/unit/test_subprocess_env.py`、`tests/integration/test_env_real_awm.py`（真实启动 AWM server，并检查进程组中没有任何 key）。
 
 ## 2. 合成：编排 AWM 的生成流水线
 
@@ -71,9 +73,13 @@ stopped wt1
 
 ```bash
 workbench synth run --scenarios 2 --out data/synth/demo           # 默认 dry-run，只打印计划
-# 真正执行需要 LLM key，并显式加 --execute（UNVERIFIED-LOCAL，未在本仓库执行过）
+# 没有 embedding 端点时跳过 gen scenario，从 gen task 开始（ADR-021）：
+workbench synth run --scenarios 1 --out data/synth/demo --scenario-file my_scenarios.jsonl
+# 真正执行需要 LLM key，并显式加 --execute
 workbench synth validate --help
 ```
+
+`--scenario-file` 的每一行必须与官方 `gen_scenario.jsonl` 格式一致（只有 `name` 与 `description`），名称以 `local_` 开头。
 
 预期 dry-run 输出（节选）：
 
@@ -93,11 +99,63 @@ dry-run 不创建任何目录。
 
 阅读：
 
-- `src/workbench/synth/runner.py`：步骤计划、`state.json` checkpoint、manifest（`origin: local-synth`）、种子文件复制；
-- `src/workbench/synth/proxy.py`、`synth/ledger.py`：本地 LLM 代理（缓存、重试、按步骤记账），真实 key 只在代理中；
+- `src/workbench/synth/runner.py`：步骤计划、`state.json` checkpoint、manifest（`origin: local-synth`）、种子文件复制；各步骤的环境变量（gen 步骤只拿到占位 key，reset_db 与 check_all 不拿任何 key，ADR-019）；
+- `src/workbench/synth/proxy.py`、`synth/ledger.py`：本地 LLM 代理（缓存、重试、按步骤记账、预算熔断），真实 key 只在代理中；
 - `src/workbench/synth/validate.py`：`awm env check_all` 结果的分类报告；
-- `configs/pricing.yaml`（占位价格）；
+- `configs/pricing.yaml`（DeepSeek `deepseek-flash` 的官方高峰价，账本按它计算上界费用）；
 - 测试：`tests/unit/test_synth.py`、`tests/integration/test_synth_validate_real_awm.py`。
+
+### 2.1 真实执行一次（Phase 13，工程事实）
+
+DeepSeek 没有 embedding 端点，所以按仓库主人的决定 D5，用 1 条手写的企业类场景 `local_it_service_desk` 从 `gen task` 开始。环境变量只在进程里设置：
+
+- `OPENAI_API_KEY="$DEEPSEEK_API_KEY"`；
+- `OPENAI_BASE_URL=https://api.deepseek.com`；
+- `AWM_SYN_OVERRIDE_MODEL=deepseek-flash`。
+
+```bash
+workbench synth run --scenarios 1 --out data/synth/p13_it_service_desk \
+  --scenario-file data/synth/p13_it_service_desk/local_scenario.jsonl --execute
+```
+
+第 1 次运行中，6 个 gen 步骤都一次成功，之后在收尾验证阶段被故意中断。用同一命令续跑（2026-09-24 21:04:54 UTC）的输出结尾：
+
+```
+  "validation": {
+    "environments_total": 1,
+    "environments_started": 1,
+    "environments_failed": 0,
+    "tools_total": 15,
+    ...
+real	0m10.034s
+exit=0
+```
+
+续跑时 6 个步骤都按 checkpoint 跳过，没有发出 LLM 请求。账本共 15 个上游响应：输入 88,523 token，输出 130,867 token，上界口径 ¥1.2240。缓存命中另用一次不带 key 的重放验证。
+
+完整过程、中断的实际情况与清理：`docs/verification/2026-09-24-synth.md`。合成出的环境只在 `data/synth/`，不入库，不用于训练，也不与官方数据混合（ADR-011）。
+
+### 2.2 中断、续跑与预算熔断（Phase 14）
+
+- **预算**：
+  - 上限是 `configs/app.yaml` 的 `synth.budget`，默认 ¥5，按 `configs/pricing.yaml` 计价；
+  - 达到上限后，代理拒绝转发（HTTP 402），当前步骤记为失败，CLI 以退出码 1 结束；
+  - 提高上限后用同一命令续跑，例如 `WORKBENCH_SYNTH__BUDGET=8 workbench synth run … --execute`；
+  - 不加 `--execute` 时，输出中的 `budget` 显示上限与已花费（ADR-023）。
+- **中断**：
+  - 按 Ctrl-C 或向 `workbench synth run` 进程发 SIGTERM，runner 会停止当前步骤及其启动的全部进程（包括 AWM 在独立会话中启动的测试 server），把该步记为 `interrupted`，以退出码 130 结束；
+  - 用同一命令续跑。未完成的步骤重做前，输出先移到 `attempts/`（ADR-022）；
+  - AWM 的临时目录 `/tmp/env_test_*` 可能残留，需要手动删除。
+- **阅读**：
+  - `runner.py` 的 `stop_process_tree`、`interruptible`、`_set_aside`、`_budget_block`；
+  - `proxy.py` 的 `over_budget`；
+  - 测试 `tests/unit/test_synth_resilience.py` 与 `tests/unit/synth_harness.py`：真实子进程，假上游监听真实端口，零成本。
+- **零成本验证**：见 `docs/verification/2026-09-24-phase14-synth-resilience.md`，其中用真实 AWM 重做了 Phase 13 的中断。
+- **上游错误**（Phase 15 起，ADR-024）：
+  - 代理把所有重试后仍以上游错误结束的请求记入账本；
+  - 某步丢失的请求多于 `synth.max_failed_requests`（默认 0）时，这一步失败，修复上游后用同一命令续跑；
+  - 丢失的请求不超过阈值时，这一步记为 `done_with_failures`，失败数列在 CLI 输出与 `validation.json` 中；
+  - 阅读 `ledger.py` 的 `step_requests` 与 `runner.py` 的 `judge_step`，测试见 `tests/unit/test_synth_failures.py`。
 
 ## 3. 服务：模型服务与 LLM 客户端
 
@@ -110,22 +168,58 @@ workbench serve vllm-cmd                  # 只打印命令
 预期输出：
 
 ```
-vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000 --served-model-name Snowflake/Arctic-AWM-4B --gpu-memory-utilization 0.9
+vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000 --served-model-name Snowflake/Arctic-AWM-4B --gpu-memory-utilization 0.9 --enable-auto-tool-choice --tool-call-parser hermes
 ```
 
+最后两个参数自 2026-09-24 起由 profile 启用（仓库主人的决定 D11，ADR-020）：智能体的 act 请求带原生 `tools`，vLLM 需要 tool parser 才接受；不带 `tools` 的请求（如 `awm agent`）不经过 parser。依据是读源码，尚未在 GPU 上验证。
+
 在 GPU 机器上运行 `scripts/serve_vllm.sh`，然后设置 `WORKBENCH_LLM__BACKEND=vllm`（UNVERIFIED-LOCAL：需要 CUDA GPU 和 `huggingface.co` 访问）。
+
+服务起来之后，可以先用探针看服务怎样处理两类工具调用请求（各发 1 个请求，不是评测）：
+
+```bash
+workbench serve probe       # 默认连 llm.base_url 与 llm.model
+```
+
+- `native`：智能体 act 步骤的请求（原生 `tools`、流式），报告服务返回的是原生 `tool_calls`，还是只能靠文本解析兜底；
+- `text`：`awm agent` 的第一个请求，由 AWM 自己的代码发出、不带 `tools`，检查 `<tool_call>` 文本是否原样留在 `content` 里。
+
+在 GPU 机器上从零开始的逐条步骤、预期输出和回贴要求见 [docs/runbooks/phase15-gpu.md](runbooks/phase15-gpu.md)。
+
+### 3.1 OpenAI 兼容端点：DeepSeek（单次链路演示，不构成评测）
+
+后端只用环境变量配置，key 只从 `DEEPSEEK_API_KEY` 读取，不写入任何文件：
+
+```bash
+export WORKBENCH_LLM__BACKEND=openai_compat WORKBENCH_LLM__BASE_URL=https://api.deepseek.com \
+       WORKBENCH_LLM__MODEL=deepseek-flash WORKBENCH_LLM__API_KEY_ENV=DEEPSEEK_API_KEY
+workbench doctor
+```
+
+2026-09-24 的实际输出（节选）：
+
+```
+│ env-vars                    │ ok     │ backend=openai_compat                                                 │
+│ llm                         │ ok     │ https://api.deepseek.com/models reachable                             │
+```
+
+要点（详见 `docs/verification/2026-09-24-llm-chain.md` §1–2）：
+
+- DeepSeek 在流式响应中返回原生 `tool_calls`，由 `openai_compat.py` 直接解析；不需要走 `<tool_call>` 文本解析。
+- DeepSeek 默认开启思考模式：思考 token 计入输出 token；`temperature` 在思考模式下不生效。
+- DeepSeek 文档要求带 `tools` 的请求回传此前各轮的 `reasoning_content`。Phase 12.5 起由 LLM 层按文档回传（`src/workbench/llm/reasoning.py`，ADR-017）；文档没写清的情况见 LIMITATIONS §6。
 
 阅读：
 
 - `configs/serving/arctic-awm-4b.yaml`：每个参数都注明了 vLLM v0.19.0 的源码位置；
 - `src/workbench/llm/client.py`：httpx 分阶段超时 + `asyncio.timeout` 墙钟，只对网络错误和 5xx 重试；
 - `src/workbench/llm/backends/openai_compat.py`（流式 SSE）、`backends/mock_replay.py`（手写脚本回放）；
-- `src/workbench/llm/toolcall_parse.py`；
+- `src/workbench/llm/toolcall_parse.py`、`llm/reasoning.py`（按 DeepSeek 文档回传 `reasoning_content`，ADR-017）；
 - 测试：`tests/unit/test_llm_client.py`、`tests/unit/test_mock_replay.py`。
 
 ## 4. 网关：策略、审批、审计
 
-目标：理解为什么所有工具调用都必须经过网关（ADR-005/006/007/009）。
+目标：理解为什么所有工具调用都必须经过网关（ADR-005/006/007/009/015）。
 
 ```bash
 workbench gateway export-risk --dataset-dir tests/fixtures/awm_mini --out data/risk_table.csv
@@ -134,20 +228,24 @@ workbench gateway export-risk --dataset-dir tests/fixtures/awm_mini --out data/r
 预期输出：
 
 ```
-wrote 7 rows to data/risk_table.csv (offline: names only; live sessions add descriptions)
+wrote 7 rows to data/risk_table.csv (offline: names and route methods; live sessions add descriptions)
+POST/PUT/PATCH/DELETE tools graded read: 0 by name alone, 0 with the HTTP-method floor
 
-scenario,tool,risk,source,reason,requires_approval
-mini_e_commerce,search_products,read,heuristic,verb 'search' => read,False
-mini_e_commerce,add_item_to_cart,write,heuristic,verb 'add' => write,True
-mini_e_commerce,remove_cart_item,destructive,heuristic,verb 'remove' => destructive,True
+scenario,tool,http_method,risk,source,reason,requires_approval,heuristic_risk
+mini_e_commerce,search_products,GET,read,heuristic,verb 'search' => read,False,read
+mini_e_commerce,add_item_to_cart,POST,write,heuristic,verb 'add' => write,True,write
+mini_e_commerce,remove_cart_item,DELETE,destructive,heuristic,verb 'remove' => destructive,True,destructive
 ...
 ```
+
+风险级别先按工具名动词判断，再以路由的 HTTP 方法为下限（DELETE 至少 `destructive`，POST/PUT/PATCH 至少 `write`，ADR-015）。迷你夹具的方法与名称一致，所以没有变化；在官方数据集上，POST/PUT/PATCH/DELETE 工具中被判为 `read` 的从 38 个降到 0 个（`docs/verification/logs/2026-09-24-phase12.5-risk-floor.log`）。
 
 `workbench gateway serve` 可以把网关作为独立的 MCP server 运行，任何 MCP 客户端都能连接。
 
 阅读：
 
 - `configs/tool_policy.yaml`：动词表、未知动词默认按 `write` 处理、需要审批的风险级别、限流参数；
+- `src/workbench/envs/catalog.py` 的 `route_methods`：用 `ast` 从场景代码中读出每个工具的 HTTP 方法（不执行代码）；
 - `src/workbench/gateway/policy.py`（deny-first 分级）、`gateway/core.py`（HMAC 一次性审批令牌，绑定会话、工具和参数摘要）、`gateway/ratelimit.py`、`gateway/audit.py`（PII 脱敏）、`gateway/errors.py`（ok / empty / error 归一，依据 AWM 的实际错误文本，见 RECON §10）；
 - `src/workbench/gateway/server.py`：低层 MCP Server，工具名为 `<scenario>__<tool>`；
 - 测试：`tests/unit/test_gateway_*.py`、`tests/integration/test_gateway_real_awm.py`。
@@ -186,6 +284,133 @@ make demo-mock          # 打开 http://127.0.0.1:8080/ui/
 在 UI 中：选择场景 → Start isolated session → 发送上面的请求 → 在审批面板点 Approve → 查看 Timeline 与 DB diff 标签页。`scripts/demo_ui_check.py` 用 Playwright 自动走一遍同样的流程。
 
 注意：mock 回答来自手写脚本，不是模型输出，不代表任何模型能力。
+
+### 5.1 真实 LLM：官方 `e_commerce_33` 任务 0（单次链路演示，不构成评测）
+
+在 3.1 的环境变量之外，这次运行还放宽了两个上限（原因：39 个工具的定义当时在每次 act 调用中出现两次，约 26K token；DeepSeek 的思考 token 计入输出）。Phase 12.5 修复后（ADR-018）默认值已足够，不再需要这两个变量，见 5.3：
+
+```bash
+export WORKBENCH_LLM__MAX_TOKENS=8192 WORKBENCH_AGENT__TOKEN_BUDGET=400000
+workbench agent run --scenario e_commerce_33 --approve auto --approver claude-code-operator \
+  "Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under \$200 to my cart in quantity 1."
+```
+
+2026-09-24 的实际输出（节选；回答全文、trace 与审计见 `docs/verification/logs/2026-09-24-phase12-workbench-agent.log`）：
+
+```
+session 98f642235e74: 39 tools from http://127.0.0.1:18100/mcp
+tool e_commerce_33__search_products -> ok (allowed)
+tool e_commerce_33__list_product_offers -> ok (allowed)
+approval_required e_commerce_33__add_item_to_cart
+approval_granted e_commerce_33__add_item_to_cart
+tool e_commerce_33__add_item_to_cart -> ok (allowed)
+memory_saved headphone_budget
+memory_saved prefers_top_rated
+memory_saved cart_id
+answer Done! Here's a summary: …
+{ "changed": true, ... "cart_items": { "rows_before": 3, "rows_after": 4, "added": [4], ... } }
+```
+
+审批由操作者在运行前决定（`--approve auto`）；闸门本身照常工作：写操作前暂停，记录 `approval_requested` / `approval_granted`，网关凭一次性令牌放行。这一次输出只证明链路打通，不代表任务完成得好不好。
+
+### 5.2 上游 `awm agent` / `awm verify` 与轨迹查看器（单次链路演示，不构成评测）
+
+`awm agent` 用 `--mcp_url` 模式连接 env-manager 启动的会话（`--scenario` 自动起服有上游缺陷，见 LIMITATIONS §6）：
+
+```bash
+workbench env serve &                                   # 控制面
+workbench env up e_commerce_33 --session-id p12awm      # -> http://127.0.0.1:18100/mcp
+OPENAI_API_KEY="$DEEPSEEK_API_KEY" awm agent --scenario e_commerce_33 --task_id 0 \
+  --tasks_path data/awm1k/gen_tasks.jsonl --mcp_url http://127.0.0.1:18100/mcp \
+  --api_url https://api.deepseek.com --model deepseek-flash --output_dir data/p12/awm-agent/e_commerce_33_task_0
+```
+
+2026-09-24 的实际输出（节选）：
+
+```
+--- Iteration 1/30 ---
+Assistant (130 chars): I'll start by listing the available tools in this environment.
+<tool_call>
+{"name": "list_tools", "arguments": null}
+</tool_call>
+--- Iteration 2/30 ---
+Assistant (360 chars): I'll search for the product with the appropriate filters.
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="call_tool">
+…
+Tool calls: 0
+No tool calls detected - task complete.
+```
+
+第 2 轮 DeepSeek 在纯文本中输出了它自己的 DSML 工具调用标记，AWM 只识别 `<tool_call>`，循环在第 2 轮结束，没有写操作（按 D3 如实记录，不改上游）。随后：
+
+```bash
+workbench env down p12awm
+OPENAI_API_KEY="$DEEPSEEK_API_KEY" OPENAI_BASE_URL=https://api.deepseek.com AWM_SYN_OVERRIDE_MODEL=deepseek-flash \
+awm verify --input data/p12/awm-agent/e_commerce_33_task_0 \
+  --init_db_path data/p12/awm-runs/p12awm/initial.db --final_db_path data/p12/awm-runs/p12awm/work.db \
+  --mode sql --verifier_path data/awm1k/gen_verifier.jsonl
+```
+
+实际输出（节选）：
+
+```
+Verifier result: reward_type=incomplete
+Running LLM judge for sql mode...
+LLM judge classification: agent_error
+Saved verification result to data/p12/awm-agent/e_commerce_33_task_0/verify.sql.json
+```
+
+Phase 15 起不再直接运行 `awm verify`，改用 `workbench verify`（ADR-025）：
+
+- code 模式不调用 LLM，子进程拿不到任何 key；
+- sql 模式经本地代理调用裁判，子进程只拿到占位 key。
+
+```bash
+workbench verify --input data/p12/awm-agent/e_commerce_33_task_0 --mode code \
+  --init-db data/p12/awm-runs/p12awm/initial.db --final-db data/p12/awm-runs/p12awm/work.db
+```
+
+最后在 UI 的 Trajectory viewer 标签页用文件输入框加载这次的 `trajectory.json`，显示 "AWM trajectory · scenario e_commerce_33 · task 0 · 2 iterations" 和两个步骤。以上输出只证明链路打通，裁判的分类不构成评测，也不得汇总成比率。详见 `docs/verification/2026-09-24-llm-chain.md` §4–6。
+
+### 5.3 Phase 12.5 修复后的确认运行（单次链路演示，不构成评测）
+
+Phase 12.5 的第 1–5 项修复全部完成后，仓库主人追加授权再运行 1 次同一任务，只用来确认修复没有破坏链路。代码为提交 `f135189`，后端 `openai_compat`（DeepSeek `deepseek-flash`）。只设置 3.1 的环境变量，预算与 `max_tokens` 都用默认值（240000 / 8192，ADR-018），不再需要 5.1 的两个覆盖：
+
+```bash
+workbench agent run --scenario e_commerce_33 --approve auto --approver claude-code-operator \
+  "Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under \$200 to my cart in quantity 1."
+```
+
+2026-09-24 18:37 UTC 的实际输出（节选；全文、trace、行级 diff 与审计见 `docs/verification/logs/2026-09-24-phase12.5-workbench-agent.log`）：
+
+```
+session 709b8875d89f: 39 tools from http://127.0.0.1:18100/mcp
+tool e_commerce_33__search_products -> ok (allowed)
+tool e_commerce_33__list_product_offers -> ok (allowed)
+approval_required e_commerce_33__get_or_create_active_cart
+approval_granted e_commerce_33__get_or_create_active_cart
+tool e_commerce_33__get_or_create_active_cart -> ok (allowed)
+approval_required e_commerce_33__add_item_to_cart
+approval_granted e_commerce_33__add_item_to_cart
+tool e_commerce_33__add_item_to_cart -> ok (allowed)
+memory_saved headphone_budget_ceiling
+memory_saved cart_id
+answer Done! Here's a summary: …
+{ "changed": true, ... "cart_items": { "rows_before": 3, "rows_after": 4, "added": [4], ... } }
+```
+
+链路再次走通：规划 → 两次读 → 两次写（均先审批）→ 回答 → verify。退出码为 0，7 次 LLM 调用，`tokens_used` 93736，没有触发任何终止条件。行级 diff 与 5.1 相同：只有 `cart_items` 新增 1 行（offer 1，数量 1），其余 18 张表不变。
+
+与 5.1 的差别，以及各项修复在这次运行中的表现（都是工程事实）：
+
+- 模型这次多调用了一次 `get_or_create_active_cart`。它是 GET 路由，名称中的动词 `create` 让它按名称就被判为 `write`（ADR-006 的启发式，不是 HTTP 方法下限），所以同样先审批；购物车 1 已存在，`carts` 表没有变化。
+- 审计摘要中的时间戳 `2026-09-24T18:37:39.267449` 保持原样，`[PHONE]` 出现 0 次（ADR-016）。
+- 每次 act 调用的 token 数为 14515–16675（5.1 为 25764–27741，ADR-018）。
+- 带 `tools` 的 act 调用都成功返回（ADR-017）。trace 不记录请求体，所以这次运行本身不能证明 `reasoning_content` 确实被回传了，回传由单测验证。
+- 官方 `e_commerce_33` 的 server 以白名单环境启动，39 个工具都能正常提供（ADR-019）。
+
+这次输出只证明修复后链路仍然打通，不代表任务完成得好不好，也不与 5.1 合并成任何比率。费用见 `docs/verification/cost-ledger.md` 第 6 行。
 
 阅读：
 

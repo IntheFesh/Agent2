@@ -1,0 +1,41 @@
+# 2026-09-24 Phase 12 step 3: one real-LLM 'awm verify --mode sql' run (TASK_v2 N2: single run; chain evidence only, not an evaluation)
+# machine: Claude Code cloud container (Linux x86_64, no GPU). OPENAI_API_KEY mapped from DEEPSEEK_API_KEY in the process env only.
+# input: the single 'awm agent' output (2026-09-24-phase12-awm-agent.log); verifier: official gen_verifier.jsonl (CC-BY-4.0)
+
+## verifier code reviewed before exec (awm/core/verify.py:120-126 runs it with full __builtins__)
+# find_scenario_entry(gen_verifier.jsonl, 'e_commerce_33', task_idx=0): 301 lines, function verify_task(initial_db_path, final_db_path);
+# only 'import sqlite3'; no open/subprocess/socket/requests/urllib/os.system/os.remove/shutil/eval/exec/__import__.
+
+## command (DB paths explicit because --mcp_url runs save no DB copies: awm/core/verify.py:41-43, 367-368)
+$ OPENAI_API_KEY="$DEEPSEEK_API_KEY" OPENAI_BASE_URL=https://api.deepseek.com AWM_SYN_OVERRIDE_MODEL=deepseek-flash \
+  uv run awm verify --input data/p12/awm-agent/e_commerce_33_task_0 \
+    --init_db_path data/p12/awm-runs/p12awm/initial.db --final_db_path data/p12/awm-runs/p12awm/work.db \
+    --mode sql --verifier_path data/awm1k/gen_verifier.jsonl
+(PYTHONPYCACHEPREFIX=$PWD/.cache/pycache; env-manager session p12awm already stopped, so the DB files were idle)
+
+## output (verbatim)
+start 2026-09-24T17:15:07Z
+2026-09-24 17:15:10.701 | INFO     | awm.core.verify:run_verify:390 - Running sql verification for scenario=e_commerce_33, task_id=0
+2026-09-24 17:15:10.705 | INFO     | awm.core.verify:run_verify:404 - Verifier result: reward_type=incomplete
+2026-09-24 17:15:10.706 | INFO     | awm.core.verify:run_verify:405 - Verify result: {"user": {"id": 1, "username": "primary_user"}, "search_term_logic": {"must_contain": ["wireless", "noise", "cancelling"], "category_hint": "Headphones"}, "candidate_products_initial": [{"product_id": 2, "title": "Bose QuietComfort 35 II Wireless Bluetooth Headphones", "description": "Premium wireless noise cancelling headphones with Alexa voice control.", "category_name": "Headphones", "average_rating": 4.8, "review_count": 5000}, {"product_id": 1, "title": "Sony WH-CH710N Wireless Noise Cancel
+2026-09-24 17:15:10.706 | INFO     | awm.core.verify:run_verify:418 - Running LLM judge for sql mode...
+2026-09-24 17:15:15.282 | INFO     | awm.core.verify:run_verify:433 - LLM judge classification: agent_error
+2026-09-24 17:15:15.283 | INFO     | awm.core.verify:run_verify:438 - Saved verification result to data/p12/awm-agent/e_commerce_33_task_0/verify.sql.json
+
+real	0m8.568s
+user	0m4.387s
+sys	0m0.578s
+exit=0
+end 2026-09-24T17:15:15Z
+
+## file modes after the run (verify chmods both DBs to 0o444 during exec and restores them)
+-rw-r--r-- data/p12/awm-runs/p12awm/initial.db
+-rw-r--r-- data/p12/awm-runs/p12awm/work.db
+
+## verify.sql.json (full copy: 2026-09-24-phase12-awm-verify.sql.json)
+keys: ['scenario', 'task_id', 'task', 'mode', 'reward_type', 'verify_result', 'llm_judge']
+{'scenario': 'e_commerce_33', 'task_id': 0, 'mode': 'sql', 'reward_type': 'incomplete'}
+llm_judge.classification: agent_error | judge_result keys: ['reasoning', 'confidence_score', 'classification', 'evidence']
+judge JSON parsed by awm (no judge_error): True
+
+## balance cross-check (USD, delta only): immediately before -> after this run: 0.00; whole session so far: 0.01

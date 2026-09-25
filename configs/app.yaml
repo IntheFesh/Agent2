@@ -25,13 +25,34 @@ llm:
   read_timeout_s: 60
   total_timeout_s: 180
   max_retries: 3
+  max_tokens: 8192               # includes thinking tokens on DeepSeek (ADR-018)
 agent:
   max_steps: 12
   repeat_call_threshold: 3
   no_change_threshold: 4
-  token_budget: 60000
+  token_budget: 240000         # a full max_steps run on a 39-tool official scenario fits (ADR-018)
   wall_clock_s: 300
 api:
   host: 127.0.0.1
   port: 8080
   max_sessions: 4
+
+synth:
+  # Budget stop for `workbench synth run --execute` (ADR-023): once the run's ledger cost, priced
+  # with configs/pricing.yaml (CNY), reaches this value the local proxy refuses to forward and the
+  # current step fails; raise it (e.g. WORKBENCH_SYNTH__BUDGET=8) and rerun the same command to
+  # resume. null disables the stop.
+  budget: 5.0
+  # A gen step whose LLM requests end in an upstream error after every retry (HTTP 4xx/5xx or a
+  # network error; AWM then writes empty results and exits 0) is judged from the ledger (ADR-024):
+  # more such requests than this fail the step, and the same command resumes it; 1..this many mark
+  # it done_with_failures (listed in the output and in validation.json), never done.
+  max_failed_requests: 0
+
+train:
+  # `workbench train preflight` and `launch` give the train env an allowlisted environment
+  # (ADR-026): the base variables, proxies, and what CUDA/NCCL/PyTorch/vLLM/Ray/veRL/Hugging Face
+  # read, never a credential-like name (HF_TOKEN, WANDB_API_KEY, ...). List extra variable NAMES
+  # here, or as WORKBENCH_TRAIN__ENV_PASSTHROUGH='["HF_TOKEN"]', if a machine needs one; the
+  # dry run (`workbench train launch`) shows which names are passed and withheld.
+  env_passthrough: []

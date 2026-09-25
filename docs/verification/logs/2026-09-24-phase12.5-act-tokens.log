@@ -1,0 +1,218 @@
+# 2026-09-24 Phase 12.5 item 4: prompt tokens of one act call before/after removing the duplicated tool
+# definitions, counted OFFLINE with DeepSeek's own encoder and tokenizer. No API call was made.
+# machine: Claude Code cloud container (Linux x86_64, no GPU)
+
+## tokenizer and encoder (downloaded to a scratch directory, not committed)
+# huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash revision dba1be0a40aa45a94ad051997016db3960a90277 (license MIT)
+# (DeepSeek-V4.1-Flash is the model version /models reports for deepseek-flash)
+c90dfa01249db1be4245780a052ede752e1361c612ac6d08e2bdada7d599476b  tokenizer.json
+502bdaec8a3fd88ebc24c4721a7038fbe42f2063c664638127056107920035c1  encoding/encoding.py
+# encoding/encoding.py: encode_messages(messages, thinking_mode=..., reasoning_effort=...); tools are attached to a
+# system message (encoding/README.md 'Tool calling'). Tokenizer: tokenizers.Tokenizer.from_file('tokenizer.json').
+# Run with: uv run --with tokenizers python <script>   (ephemeral overlay; not an app dependency)
+
+## 1. validation: the offline count equals the prompt_tokens DeepSeek billed for the Phase 12 probes
+validation against exact API prompt_tokens (Phase 12 probes):
+  P1 thinking, 1 tool              offline    286 | API    286 | diff +0
+  P2 non-thinking, 39 e33 tools    offline  13248 | API  13248 | diff +0
+  P3 thinking, 1 tool              offline    309 | API    309 | diff +0
+  P4 thinking, no tools            offline     40 | API     40 | diff +0
+
+## 2. one act call on official e_commerce_33 task 0 (39 tools; the Phase 12 plan), thinking mode
+$ uv run --with tokenizers python measure_act.py before   # at 37fce26 composition (act prompt v1)
+{"label": "before", "act_prompt_version": 1, "act_system_chars": 42814, "act_prompt_tokens": 25640, "native_tools_tokens": 13231, "plan_prompt_tokens": 12251}
+$ uv run --with tokenizers python measure_act.py after    # this change (act prompt v2)
+{"label": "after", "act_prompt_version": 2, "act_system_chars": 3888, "act_prompt_tokens": 14358, "native_tools_tokens": 13231, "plan_prompt_tokens": 12251}
+
+## 3. per-call completion sizes of the Phase 12 run (billed total from its trace minus offline prompt)
+call     prompt (offline) billed total completion
+plan                12251        12627        376
+act1                25640        25764        124
+act2                26437        26615        178
+act3                26619        27403        784
+act4                26781        27741        960
+verify               1554         1804        250
+act totals: [25764, 26615, 27403, 27741] | step-to-step growth: [851, 788, 338] | mean growth: 659
+
+## 4. new defaults
+act prompt tokens: before 25640, after 14358 (saving 11282 per act call)
+Phase 12 run projected with the fix: 76826 tokens (was 121954)
+token_budget: plan 12627 + sum_k=0..11(14482 + 659*k) + verify 1804 = 231709 -> 240000
+max_tokens: largest measured completion 960; 8 x 960 = 7680 -> next power of two 8192
+
+## appendix: count_tokens.py
+"""Offline prompt-token counts with DeepSeek-V4.1-Flash's own encoder + tokenizer (no API call).
+
+Tokenizer and encoder: huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash @ dba1be0 (MIT):
+tokenizer.json (sha256 c90dfa01...), encoding/encoding.py (sha256 502bdaec...).
+Tools are attached to a system message (encoding/README.md "Tool calling"); requests without a
+system message get one with empty content carrying the tools.
+"""
+import json, sys
+from pathlib import Path
+
+S = Path("<scratchpad>")
+sys.path.insert(0, str(S / "p125/dsv41/encoding"))
+from encoding import encode_messages  # noqa: E402
+from tokenizers import Tokenizer  # noqa: E402
+
+TOK = Tokenizer.from_file(str(S / "p125/dsv41/tokenizer.json"))
+
+
+def count(messages: list[dict], tools: list[dict] | None, thinking: bool) -> int:
+    msgs = [dict(m) for m in messages]
+    if tools:
+        if msgs and msgs[0]["role"] == "system":
+            msgs[0]["tools"] = tools
+        else:
+            msgs.insert(0, {"role": "system", "content": "", "tools": tools})
+    prompt = encode_messages(msgs, thinking_mode="thinking" if thinking else "chat", reasoning_effort="high")
+    return len(TOK.encode(prompt, add_special_tokens=False).ids)
+
+
+def fn(name: str, desc: str, params: dict) -> dict:
+    return {"type": "function", "function": {"name": name, "description": desc, "parameters": params}}
+
+
+if __name__ == "__main__":
+    e33_native = json.loads((S / "p12/e33_native_tools.json").read_text())
+    probes = [
+        ("P1 thinking, 1 tool", [{"role": "user", "content": "What is the current UTC time? Use the tool."}],
+         [fn("get_utc_time", "Return the current UTC time.", {"type": "object", "properties": {}})], True, 286),
+        ("P2 non-thinking, 39 e33 tools", [{"role": "user", "content": "Which top-level product categories exist? Use a tool."}],
+         e33_native, False, 13248),
+        ("P3 thinking, 1 tool", [{"role": "user", "content": "Compute 17*23 + 19*21 step by step, then call record_answer with the result."}],
+         [fn("record_answer", "Record the final numeric answer.", {"type": "object", "properties": {"value": {"type": "number"}}, "required": ["value"]})], True, 309),
+        ("P4 thinking, no tools", [{"role": "user", "content": "Write a 300-word story about a lighthouse."}], None, True, 40),
+    ]
+    print("validation against exact API prompt_tokens (Phase 12 probes):")
+    for label, msgs, tools, thinking, api in probes:
+        n = count(msgs, tools, thinking)
+        print(f"  {label:32s} offline {n:6d} | API {api:6d} | diff {n - api:+d}")
+
+## appendix: measure_act.py
+"""Prompt tokens of one act call and one plan call on official e_commerce_33 task 0 (offline).
+
+The act request is rebuilt exactly as the agent sends it (agent/nodes/plan.py composes the act
+system prompt, agent/nodes/act.py sends it with the native tools payload of
+llm/backends/openai_compat.py); the plan is the one DeepSeek produced in the Phase 12 run.
+"""
+import json, sys
+from pathlib import Path
+
+S = Path("<scratchpad>")
+sys.path.insert(0, str(S / "p125"))
+from count_tokens import count  # noqa: E402
+from workbench.agent.nodes import common  # noqa: E402
+from workbench.agent.prompts import load_prompt  # noqa: E402
+from workbench.llm.backends.openai_compat import _tools_payload  # noqa: E402
+
+label = sys.argv[1]
+tools = json.loads((S / "p125/e33_tools.json").read_text())
+trace = [json.loads(l) for l in Path("docs/verification/logs/2026-09-24-phase12-workbench-agent.trace.jsonl").read_text().splitlines()]
+steps = next(e["steps"] for e in trace if e.get("type") == "node" and e.get("node") == "plan")
+request = "Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under $200 to my cart in quantity 1."
+native = _tools_payload(common.llm_tools(tools))
+
+act = load_prompt("act")
+if hasattr(common, "act_system_prompt"):  # after the change
+    act_system = common.act_system_prompt(act.text, steps, tools)
+else:  # composition before the change (agent/nodes/plan.py at 37fce26)
+    act_system = f"{act.text}\n\nPlan:\n{json.dumps(steps, ensure_ascii=False, indent=1)}\n\nAvailable tools:\n{common.tools_block(tools)}"
+plan = load_prompt("plan")
+plan_system = f"{plan.text}\n\nAvailable tools:\n{common.tools_block(tools)}"
+
+act_msgs = [{"role": "system", "content": act_system}, {"role": "user", "content": request}]
+act_tokens = count(act_msgs, native, thinking=True)
+plan_tokens = count([{"role": "system", "content": plan_system}, {"role": "user", "content": request}], None, thinking=True)
+tools_only = count([{"role": "system", "content": ""}], native, thinking=True) - count([{"role": "system", "content": ""}], None, thinking=True)
+result = {
+    "label": label,
+    "act_prompt_version": act.version,
+    "act_system_chars": len(act_system),
+    "act_prompt_tokens": act_tokens,
+    "native_tools_tokens": tools_only,
+    "plan_prompt_tokens": plan_tokens,
+}
+print(json.dumps(result))
+(S / f"p125/act_tokens_{label}.json").write_text(json.dumps(result), encoding="utf-8")
+
+## appendix: phase12_completions.py
+"""Rebuild every request of the Phase 12 `workbench agent run` from its trace (old composition,
+no reasoning passed back), count its prompt offline, and derive completion = billed total - prompt.
+Assistant text of tool-call turns is not in the trace and is taken as "" (its tokens then count
+as completion, so completions are upper bounds)."""
+import json, sys
+from pathlib import Path
+
+S = Path("<scratchpad>")
+sys.path.insert(0, str(S / "p125"))
+from count_tokens import count  # noqa: E402
+from workbench.agent.nodes import common  # noqa: E402
+from workbench.agent.prompts import load_prompt  # noqa: E402
+from workbench.llm.backends.openai_compat import _tools_payload  # noqa: E402
+
+tools = json.loads((S / "p125/e33_tools.json").read_text())
+native = _tools_payload(common.llm_tools(tools))
+ev = [json.loads(l) for l in Path("docs/verification/logs/2026-09-24-phase12-workbench-agent.trace.jsonl").read_text().splitlines()]
+request = "Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under $200 to my cart in quantity 1."
+steps = next(e["steps"] for e in ev if e.get("type") == "node" and e.get("node") == "plan")
+act_v1 = "\n".join(Path("src/workbench/agent/prompts/act.md").read_text().splitlines()[1:])  # current file is v2
+import subprocess
+act_v1 = subprocess.run(["git", "show", "37fce26:src/workbench/agent/prompts/act.md"], capture_output=True, text=True, check=True).stdout.split("\n", 1)[1].strip()
+old_system = f"{act_v1}\n\nPlan:\n{json.dumps(steps, ensure_ascii=False, indent=1)}\n\nAvailable tools:\n{common.tools_block(tools)}"
+plan_system = f"{load_prompt('plan').text}\n\nAvailable tools:\n{common.tools_block(tools)}"
+
+totals = {"plan": next(e["tokens"] for e in ev if e.get("type") == "llm" and e["purpose"] == "plan")}
+acts = [e["tokens"] for e in ev if e.get("type") == "llm" and e["purpose"] == "act"]
+final = [e for e in ev if e.get("type") == "final"][-1]
+totals["verify"] = final["tokens_used"] - totals["plan"] - sum(acts)
+
+rows = [("plan", count([{"role": "system", "content": plan_system}, {"role": "user", "content": request}], None, True), totals["plan"])]
+messages = [{"role": "system", "content": old_system}, {"role": "user", "content": request}]
+calls = [e for e in ev if e.get("type") == "node" and e.get("node") == "act" and e.get("tool")]
+results = [e for e in ev if e.get("type") == "tool_call"]
+tool_results_for_verify = []
+for i, total in enumerate(acts):
+    rows.append((f"act{i + 1}", count(messages, native, True), total))
+    if i < len(calls):
+        c, r = calls[i], results[i]
+        tc = {"id": f"call_{i}", "type": "function", "function": {"name": c["tool"], "arguments": json.dumps(c["arguments"])}}
+        messages = messages + [{"role": "assistant", "content": "", "tool_calls": [tc]}]
+        payload = {"status": r["status"], "result": json.loads(r["text"])}
+        content = json.dumps(payload, ensure_ascii=False, default=str)
+        messages = messages + [{"role": "tool", "tool_call_id": f"call_{i}", "content": content}]
+        tool_results_for_verify.append(content)
+verify_prompt = load_prompt("verify")
+draft = next(e["answer"] for e in ev if e.get("type") == "final")
+ctx = {"request": request, "plan": steps, "tool_results": tool_results_for_verify[-8:], "draft_answer": draft}
+rows.append(("verify", count([{"role": "system", "content": verify_prompt.text}, {"role": "user", "content": json.dumps(ctx, ensure_ascii=False)}], None, True), totals["verify"]))
+print(f"{'call':8s} {'prompt (offline)':>16s} {'billed total':>12s} {'completion':>10s}")
+for name, prompt, total in rows:
+    print(f"{name:8s} {prompt:16d} {total:12d} {total - prompt:10d}")
+growth = [acts[i + 1] - acts[i] for i in range(len(acts) - 1)]
+print("act totals:", acts, "| step-to-step growth:", growth, "| mean growth:", round(sum(growth) / len(growth)))
+
+## appendix: defaults.py
+"""Derive agent.token_budget and llm.max_tokens from the measurements (no API call)."""
+import json, math
+from pathlib import Path
+
+S = Path("<scratchpad>/p125")
+before = json.loads((S / "act_tokens_before.json").read_text())
+after = json.loads((S / "act_tokens_after.json").read_text())
+ev = [json.loads(l) for l in Path("docs/verification/logs/2026-09-24-phase12-workbench-agent.trace.jsonl").read_text().splitlines()]
+plan_total = next(e["tokens"] for e in ev if e.get("type") == "llm" and e["purpose"] == "plan")
+acts = [e["tokens"] for e in ev if e.get("type") == "llm" and e["purpose"] == "act"]
+verify_total = [e for e in ev if e.get("type") == "final"][-1]["tokens_used"] - plan_total - sum(acts)
+saving = before["act_prompt_tokens"] - after["act_prompt_tokens"]
+growth = round((acts[-1] - acts[0]) / (len(acts) - 1))
+act1_after = acts[0] - saving
+max_steps = 12
+full_run = plan_total + sum(act1_after + k * growth for k in range(max_steps)) + verify_total
+print(f"act prompt tokens: before {before['act_prompt_tokens']}, after {after['act_prompt_tokens']} (saving {saving} per act call)")
+print(f"Phase 12 run projected with the fix: {plan_total + sum(a - saving for a in acts) + verify_total} tokens (was {plan_total + sum(acts) + verify_total})")
+print(f"token_budget: plan {plan_total} + sum_k=0..{max_steps - 1}({act1_after} + {growth}*k) + verify {verify_total} = {full_run} -> {math.ceil(full_run / 10_000) * 10_000}")
+max_completion = 960  # largest per-call completion (incl. thinking) of the Phase 12 run, phase12_completions.py
+print(f"max_tokens: largest measured completion {max_completion}; 8 x {max_completion} = {8 * max_completion} -> next power of two {2 ** math.ceil(math.log2(8 * max_completion))}")
+

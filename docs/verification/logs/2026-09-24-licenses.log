@@ -1,0 +1,26 @@
+# 2026-09-24 13:19 UTC
+$ git ls-remote https://github.com/Snowflake-Labs/agent-world-model.git HEAD refs/heads/main 'refs/pull/17/*'
+85e322f69279e3b3325b7377ec3bab788514e9cb	HEAD
+85e322f69279e3b3325b7377ec3bab788514e9cb	refs/heads/main
+dfe98eb625eb665e550e85f05a283901c439ee69	refs/pull/17/head
+3ca5631d0ea8e265303ea82aa08f7dbd1f70a66a	refs/pull/17/merge
+$ git clone --filter=blob:none --no-checkout https://github.com/Snowflake-Labs/agent-world-model.git awm
+$ git -C awm log --oneline -3 origin/HEAD
+85e322f add benchmark (#11)
+6a956c5 update README
+91a9578 update verification
+$ git -C awm ls-tree --name-only origin/HEAD
+.gitmodules .python-version README.md awm figures mcp-adapted-bench outputs pyproject.toml uv.lock
+$ git -C awm log --all --oneline -- 'LICENSE*' 'COPYING*'
+(empty)
+$ curl -sSL https://github.com/Snowflake-Labs/agent-world-model/pull/17   -> 403 (via curl); read with WebFetch:
+  Title: "chore: add MIT License, CONTRIBUTING, CODE_OF_CONDUCT, and CI workflow"; Author: dafahaha; State: Open;
+  Created: September 16, 2026; "At least 1 approving review is required to merge this pull request."
+
+$ curl -sS https://huggingface.co/api/models/Snowflake/Arctic-AWM-{4B,8B,14B}   (cardData / tags)
+4B  sha 437dfa0e12702901eb41c30e9326a90996549650 card license apache-2.0 base_model ['Qwen/Qwen3-4B']
+8B  sha 63ebcb9960127e42bf381f325ab68937b383d637 card license apache-2.0 base_model ['Qwen/Qwen3-4B']
+14B sha fa3e3b1b4021245e2df94844169e95aced55cf07 card license apache-2.0 base_model ['Qwen/Qwen3-4B']
+$ curl -sSL https://huggingface.co/datasets/Snowflake/AgentWorldModel-1K/resolve/main/README.md | head -2
+---
+license: "cc-by-4.0"

@@ -1,0 +1,45 @@
+# 2026-09-24 Phase 12.5 item 1: HTTP-method risk floor (ADR-015). Engineering facts measured by script; no LLM involved.
+# machine: Claude Code cloud container (Linux x86_64, no GPU); dataset data/awm1k revision dde80a0
+
+## 1. before: risk table exported by the old code (HEAD 37fce26, before any change)
+$ uv run workbench gateway export-risk --dataset-dir data/awm1k --out risk_before.csv
+wrote 35062 rows to risk_before.csv (offline: names only; live sessions add descriptions)
+
+## 2. after: risk table exported by the new code
+$ uv run workbench gateway export-risk --dataset-dir data/awm1k --out risk_after.csv
+wrote 35062 rows to risk_after.csv (offline: names and route methods; live sessions add descriptions)
+POST/PUT/PATCH/DELETE tools graded read: 38 by name alone, 0 with the HTTP-method floor 
+
+## 3. join both tables (script below)
+$ uv run python count_risk.py risk_before.csv risk_after.csv
+tools: 35062 | by method: {'DELETE': 574, 'GET': 16688, 'PATCH': 3605, 'POST': 13819, 'PUT': 376}
+write-method tools graded read: before (old code) 38, after 0
+level changes (before -> after): {('read', 'write'): 37, ('write', 'destructive'): 55, ('read', 'destructive'): 1}
+newly requiring approval: 38
+no longer requiring approval: 0
+heuristic_risk column == old risk for every tool: True
+
+## 4. cost of the per-session lookup (one scenario from the 104 MB gen_envs.jsonl)
+load_route_methods(data/awm1k, subscription_management_5): 32 routes in 0.09s; purge_my_list_by_maturity_level -> DELETE
+
+## 5. AST scan of the official code (prototype run before the change)
+# all 1000 scenarios parse; all 35062 routes are @app.<method>(...) with a literal operation_id;
+# ast-derived tool names == catalog regex names in every scenario; by method: GET 16688, POST 13819, PATCH 3605, DELETE 574, PUT 376
+
+## appendix: count_risk.py
+"""Join the risk table exported by the old code (37fce26) with the new one; count what the floor changed."""
+import csv, collections, sys
+before = {(r["scenario"], r["tool"]): r for r in csv.DictReader(open(sys.argv[1], encoding="utf-8"))}
+after = {(r["scenario"], r["tool"]): r for r in csv.DictReader(open(sys.argv[2], encoding="utf-8"))}
+assert before.keys() == after.keys(), "tool sets differ"
+WRITE = {"POST", "PUT", "PATCH", "DELETE"}
+methods = collections.Counter(r["http_method"] or "(none)" for r in after.values())
+print("tools:", len(after), "| by method:", dict(sorted(methods.items())))
+old_read_writes = sum(1 for k, r in after.items() if r["http_method"] in WRITE and before[k]["risk"] == "read")
+new_read_writes = sum(1 for r in after.values() if r["http_method"] in WRITE and r["risk"] == "read")
+print(f"write-method tools graded read: before (old code) {old_read_writes}, after {new_read_writes}")
+trans = collections.Counter((before[k]["risk"], r["risk"]) for k, r in after.items() if before[k]["risk"] != r["risk"])
+print("level changes (before -> after):", dict(trans))
+print("newly requiring approval:", sum(1 for k, r in after.items() if before[k]["requires_approval"] == "False" and r["requires_approval"] == "True"))
+print("no longer requiring approval:", sum(1 for k, r in after.items() if before[k]["requires_approval"] == "True" and r["requires_approval"] == "False"))
+print("heuristic_risk column == old risk for every tool:", all(before[k]["risk"] == r["heuristic_risk"] for k, r in after.items()))

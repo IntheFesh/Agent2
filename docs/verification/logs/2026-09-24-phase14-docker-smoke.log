@@ -1,0 +1,147 @@
+# 2026-09-24 Phase 14: Docker build and compose start (U6; owner decision D15). Engineering facts only.
+# Excerpts, verbatim, from (1) the local dockerd attempt in the Claude Code cloud container and (2) two runs of
+# the GitHub Actions job docker-smoke (.github/workflows/docker-smoke.yml -> python3 scripts/docker_smoke.py).
+# Lines about credentials (which GitHub masks) are left out. The only other edit: the submodule checkout lines
+# carry a `pragma: allowlist secret` comment for the secret scanner (they hold public git SHAs).
+
+## 1. local attempt: dockerd in the Claude Code cloud container (log excerpt)
+time="2026-09-24T21:45:56.133913958Z" level=info msg="Docker daemon" commit=f78c987 containerd-snapshotter=true storage-driver=overlayfs version=29.3.1
+time="2026-09-24T21:45:56.151995827Z" level=info msg="Daemon has completed initialization"
+time="2026-09-24T21:45:56.152119297Z" level=info msg="API listen on /var/run/docker.sock"
+time="2026-09-24T21:46:04.801507780Z" level=info msg="fetch failed after status: 429 Too Many Requests" host=registry-1.docker.io
+time="2026-09-24T21:46:04.804544228Z" level=error msg="Handler for POST /v1.54/images/create returned error: unknown: failed to resolve reference \"docker.io/library/python:3.12-slim\": unexpected status from HEAD request to https://registry-1.docker.io/v2/library/python/manifests/3.12-slim: 429 Too Many Requests"
+time="2026-09-24T21:46:05.442105285Z" level=info msg="fetch failed after status: 429 Too Many Requests" host=registry-1.docker.io
+time="2026-09-24T21:46:05.445332568Z" level=error msg="Handler for POST /v1.54/images/create returned error: unknown: failed to resolve reference \"docker.io/library/python:3.12-slim\": unexpected status from HEAD request to https://registry-1.docker.io/v2/library/python/manifests/3.12-slim: 429 Too Many Requests"
+
+## 2. docker-smoke run 1: https://github.com/IntheFesh/Agent2/actions/runs/36064190322 (job 107849961827), commit 5419a2c
+2026-09-24T21:52:48.0008692Z Current runner version: '2.337.0'
+2026-09-24T21:52:48.0031188Z 24.04.5
+2026-09-24T21:52:48.0032561Z Image: ubuntu-24.04
+2026-09-24T21:52:48.0032976Z Version: 20260920.314.1
+2026-09-24T21:52:51.0510903Z Submodule path 'third_party/AgentFly': checked out '1256586b1109ba8e0dc0f179f8515b4567d09df4'  # pragma: allowlist secret
+2026-09-24T21:52:51.0650830Z Submodule path 'third_party/agent-world-model': checked out '85e322f69279e3b3325b7377ec3bab788514e9cb'  # pragma: allowlist secret
+2026-09-24T21:52:51.1874786Z 5419a2c6fec64c4d79ee844f606a4fdd93921cb1
+2026-09-24T21:52:51.2031526Z ##[group]Run python3 scripts/docker_smoke.py
+2026-09-24T21:52:51.2696631Z $ docker version --format {{.Server.Version}}
+2026-09-24T21:52:51.3495182Z $ docker compose version --short
+2026-09-24T21:52:53.6220775Z $ docker compose build
+2026-09-24T21:52:57.3297830Z #8 [app] FROM ghcr.io/astral-sh/uv:0.8.17@sha256:e4644cb5bd56fdc2c5ea3ee0525d9d21eed1603bccd6a21f887a938be7e85be1
+2026-09-24T21:52:59.0114459Z #9 [app stage-0  1/10] FROM docker.io/library/python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
+2026-09-24T21:52:59.9596869Z #15 [env-manager stage-0  7/10] RUN uv sync --frozen --no-dev
+2026-09-24T21:53:01.6840618Z #15 1.725 Prepared 121 packages in 1.51s
+2026-09-24T21:53:01.9821600Z #15 2.173 Installed 121 packages in 447ms
+2026-09-24T21:53:06.5204097Z #15 DONE 6.5s
+2026-09-24T21:53:09.5285286Z #19 writing image sha256:a6e6825d8841844feadc2a2befd4fdc8ece57869ba02fa2d1c0d89ecd3df55b9 done
+2026-09-24T21:53:09.5285610Z #19 naming to docker.io/library/agent2-app done
+2026-09-24T21:53:09.5286890Z #21 writing image sha256:a6e6825d8841844feadc2a2befd4fdc8ece57869ba02fa2d1c0d89ecd3df55b9 done
+2026-09-24T21:53:09.5287165Z #21 naming to docker.io/library/agent2-env-manager done
+2026-09-24T21:53:09.5288048Z  app  Built
+2026-09-24T21:53:09.5288215Z  env-manager  Built
+2026-09-24T21:53:09.5317031Z $ docker compose config --images
+2026-09-24T21:53:09.5865564Z $ docker image inspect --format {{.Id}} {{.Size}} agent2-env-manager
+2026-09-24T21:53:09.5975097Z $ docker image inspect --format {{.Id}} {{.Size}} agent2-app
+2026-09-24T21:53:09.6065104Z $ docker compose up -d
+2026-09-24T21:53:09.6700058Z  Network agent2_default  Creating
+2026-09-24T21:53:09.6966783Z  Network agent2_default  Created
+2026-09-24T21:53:09.6972328Z  Container agent2-env-manager-1  Creating
+2026-09-24T21:53:09.7145313Z  Container agent2-env-manager-1  Created
+2026-09-24T21:53:09.7145626Z  Container agent2-app-1  Creating
+2026-09-24T21:53:09.7218280Z  Container agent2-app-1  Created
+2026-09-24T21:53:09.7225528Z  Container agent2-env-manager-1  Starting
+2026-09-24T21:53:09.8522459Z  Container agent2-env-manager-1  Started
+2026-09-24T21:53:09.8527472Z  Container agent2-env-manager-1  Waiting
+2026-09-24T21:53:20.3536267Z  Container agent2-env-manager-1  Healthy
+2026-09-24T21:53:20.3536766Z  Container agent2-app-1  Starting
+2026-09-24T21:53:20.4570590Z  Container agent2-app-1  Started
+2026-09-24T21:53:28.5925621Z  Container agent2-app-1  Stopping
+2026-09-24T21:53:29.3678262Z  Container agent2-app-1  Stopped
+2026-09-24T21:53:29.3678608Z  Container agent2-app-1  Removing
+2026-09-24T21:53:29.5468885Z  Container agent2-app-1  Removed
+2026-09-24T21:53:29.5470087Z  Container agent2-env-manager-1  Stopping
+2026-09-24T21:53:29.7455477Z  Container agent2-env-manager-1  Stopped
+2026-09-24T21:53:29.7455820Z  Container agent2-env-manager-1  Removing
+2026-09-24T21:53:30.0760148Z  Container agent2-env-manager-1  Removed
+2026-09-24T21:53:30.0772494Z  Network agent2_default  Removing
+2026-09-24T21:53:30.1847597Z  Network agent2_default  Removed
+2026-09-24T21:53:30.1890794Z == docker smoke summary ==
+2026-09-24T21:53:30.1890970Z docker 28.0.4
+2026-09-24T21:53:30.1891093Z compose 2.38.2
+2026-09-24T21:53:30.1891223Z build (docker compose build): 15.9 s
+2026-09-24T21:53:30.1891421Z image agent2-env-manager: 880.1 MB (sha256:a6e6825d8841)
+2026-09-24T21:53:30.1891626Z image agent2-app: 880.1 MB (sha256:a6e6825d8841)
+2026-09-24T21:53:30.1891841Z cold start (docker compose up -d -> GET /healthz ok): 13.4 s
+2026-09-24T21:53:30.1892076Z session start (POST /sessions, mini_e_commerce): 5.4 s, 7 tools
+2026-09-24T21:53:30.1892290Z query: mini_e_commerce__search_products -> ok
+2026-09-24T21:53:30.1892840Z write paused for approval: mini_e_commerce__add_item_to_cart (risk write)
+2026-09-24T21:53:30.1893110Z approved by ci-docker-smoke: mini_e_commerce__add_item_to_cart -> ok
+2026-09-24T21:53:30.1893403Z done: "I added 'Wireless Noise Cancelling Headphones A' ($189) to your cart (quantity 1)."
+2026-09-24T21:53:30.1893653Z db diff: cart_items added [2]
+2026-09-24T21:53:30.1893793Z result: PASS
+2026-09-24T21:53:30.4024413Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+
+## 3. docker-smoke run 2: https://github.com/IntheFesh/Agent2/actions/runs/36067444909 (job 107860400689), commit c2a8a08
+2026-09-24T22:26:39.2486087Z Current runner version: '2.337.0'
+2026-09-24T22:26:39.2518763Z 24.04.5
+2026-09-24T22:26:39.2520825Z Image: ubuntu-24.04
+2026-09-24T22:26:39.2521414Z Version: 20260920.314.1
+2026-09-24T22:26:41.9664501Z Submodule path 'third_party/AgentFly': checked out '1256586b1109ba8e0dc0f179f8515b4567d09df4'  # pragma: allowlist secret
+2026-09-24T22:26:41.9850279Z Submodule path 'third_party/agent-world-model': checked out '85e322f69279e3b3325b7377ec3bab788514e9cb'  # pragma: allowlist secret
+2026-09-24T22:26:42.1164782Z c2a8a0858dcbcc142b00cc1577185326ee44bd7e
+2026-09-24T22:26:42.1367389Z ##[group]Run python3 scripts/docker_smoke.py
+2026-09-24T22:26:42.2156533Z $ docker version --format {{.Server.Version}}
+2026-09-24T22:26:42.2976734Z $ docker compose version --short
+2026-09-24T22:26:42.6633033Z $ docker compose build
+2026-09-24T22:26:44.7246843Z #8 [app] FROM ghcr.io/astral-sh/uv:0.8.17@sha256:e4644cb5bd56fdc2c5ea3ee0525d9d21eed1603bccd6a21f887a938be7e85be1
+2026-09-24T22:26:52.5229575Z #9 [app stage-0  1/10] FROM docker.io/library/python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
+2026-09-24T22:26:53.5386956Z #8 [app] FROM ghcr.io/astral-sh/uv:0.8.17@sha256:e4644cb5bd56fdc2c5ea3ee0525d9d21eed1603bccd6a21f887a938be7e85be1
+2026-09-24T22:26:53.9284586Z #15 [app stage-0  7/10] RUN uv sync --frozen --no-dev
+2026-09-24T22:26:56.2733763Z #15 2.346 Prepared 121 packages in 2.07s
+2026-09-24T22:26:56.6004161Z #15 2.822 Installed 121 packages in 476ms
+2026-09-24T22:27:02.0841794Z #15 DONE 8.1s
+2026-09-24T22:27:05.6527076Z #19 writing image sha256:87d377895644d930bc50262ab3830aa42bdca5662f09675337464a14c1a20bcb done
+2026-09-24T22:27:05.6528931Z #19 naming to docker.io/library/agent2-env-manager done
+2026-09-24T22:27:05.6533176Z #20 writing image sha256:87d377895644d930bc50262ab3830aa42bdca5662f09675337464a14c1a20bcb done
+2026-09-24T22:27:05.6534244Z #20 naming to docker.io/library/agent2-app done
+2026-09-24T22:27:05.6536609Z  app  Built
+2026-09-24T22:27:05.6536926Z  env-manager  Built
+2026-09-24T22:27:05.6557895Z $ docker compose config --images
+2026-09-24T22:27:05.7309520Z $ docker image inspect --format {{.Id}} {{.Size}} agent2-app
+2026-09-24T22:27:05.7449433Z $ docker image inspect --format {{.Id}} {{.Size}} agent2-env-manager
+2026-09-24T22:27:05.7573715Z $ docker compose up -d
+2026-09-24T22:27:05.8388127Z  Network agent2_default  Creating
+2026-09-24T22:27:05.8685242Z  Network agent2_default  Created
+2026-09-24T22:27:05.8694555Z  Container agent2-env-manager-1  Creating
+2026-09-24T22:27:05.9018523Z  Container agent2-env-manager-1  Created
+2026-09-24T22:27:05.9019574Z  Container agent2-app-1  Creating
+2026-09-24T22:27:05.9147879Z  Container agent2-app-1  Created
+2026-09-24T22:27:05.9155938Z  Container agent2-env-manager-1  Starting
+2026-09-24T22:27:06.0562426Z  Container agent2-env-manager-1  Started
+2026-09-24T22:27:06.0562988Z  Container agent2-env-manager-1  Waiting
+2026-09-24T22:27:16.5583084Z  Container agent2-env-manager-1  Healthy
+2026-09-24T22:27:16.5583652Z  Container agent2-app-1  Starting
+2026-09-24T22:27:16.6896601Z  Container agent2-app-1  Started
+2026-09-24T22:27:28.5294941Z  Container agent2-app-1  Stopping
+2026-09-24T22:27:29.3217747Z  Container agent2-app-1  Stopped
+2026-09-24T22:27:29.3218832Z  Container agent2-app-1  Removing
+2026-09-24T22:27:29.5156013Z  Container agent2-app-1  Removed
+2026-09-24T22:27:29.5157148Z  Container agent2-env-manager-1  Stopping
+2026-09-24T22:27:29.7773127Z  Container agent2-env-manager-1  Stopped
+2026-09-24T22:27:29.7773935Z  Container agent2-env-manager-1  Removing
+2026-09-24T22:27:30.1362264Z  Container agent2-env-manager-1  Removed
+2026-09-24T22:27:30.1369629Z  Network agent2_default  Removing
+2026-09-24T22:27:30.2293626Z  Network agent2_default  Removed
+2026-09-24T22:27:30.2332572Z == docker smoke summary ==
+2026-09-24T22:27:30.2333169Z docker 28.0.4
+2026-09-24T22:27:30.2333791Z compose 2.38.2
+2026-09-24T22:27:30.2334149Z build (docker compose build): 23.0 s
+2026-09-24T22:27:30.2334603Z image agent2-app: 880.2 MB (sha256:87d377895644)
+2026-09-24T22:27:30.2335101Z image agent2-env-manager: 880.2 MB (sha256:87d377895644)
+2026-09-24T22:27:30.2335679Z cold start (docker compose up -d -> GET /healthz ok): 15.0 s
+2026-09-24T22:27:30.2336467Z session start (POST /sessions, mini_e_commerce): 7.6 s, 7 tools
+2026-09-24T22:27:30.2336989Z query: mini_e_commerce__search_products -> ok
+2026-09-24T22:27:30.2337589Z write paused for approval: mini_e_commerce__add_item_to_cart (risk write)
+2026-09-24T22:27:30.2338190Z approved by ci-docker-smoke: mini_e_commerce__add_item_to_cart -> ok
+2026-09-24T22:27:30.2338761Z done: "I added 'Wireless Noise Cancelling Headphones A' ($189) to your cart (quantity 1)."
+2026-09-24T22:27:30.2339641Z db diff: cart_items added [2]
+2026-09-24T22:27:30.2340020Z result: PASS
+2026-09-24T22:27:30.5031727Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
