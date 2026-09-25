@@ -2,7 +2,7 @@
 
 本文供仓库主人在自己租用的 GPU 机器上手动执行（那台机器上不运行 Claude Code，用户决定 D18、D21）。执行完成后，按 §5 把日志脱敏并回贴；Claude Code 据此更新 U1、U3、U4、U5、U8 与 `docs/LIMITATIONS.md`。
 
-- 本文写于 2026-09-25，对应分支 `phase9-verification`。命令、参数与预期输出都对照过源码，或在无 GPU 的容器里核对过（出处见各步骤，以及 `docs/RECON.md` 的"Phase 15 前置修复"与"Phase 15 runbook"两节）。**所有 GPU 步骤都没有实际执行过（UNVERIFIED-LOCAL）**：实际输出与本文不符时以实际为准，照实回贴，不要为了"通过"而改命令。
+- 本文写于 2026-09-25，随分支 `phase9-verification` 提交并经 PR 合入 `main`。本轮没有执行（D22）；以后仓库主人在新分支上单独执行，回贴日志后另提 PR。命令、参数与预期输出都对照过源码，或在无 GPU 的容器里核对过（出处见各步骤，以及 `docs/RECON.md` 的"Phase 15 前置修复"与"Phase 15 runbook"两节）。**所有 GPU 步骤都没有实际执行过（UNVERIFIED-LOCAL）**：实际输出与本文不符时以实际为准，照实回贴，不要为了"通过"而改命令。
 - 执行纪律：
   - 不做评测（R1）。每条调用模型的命令只执行 **1 次**、只跑 1 个任务；不重跑、不挑结果，也不汇总成比率（N2）。命令在调用模型之前就失败的（服务没起来、路径写错、依赖缺失），修好后可以再执行一次，回贴时写明。
   - 不调用任何付费 API（D14）。本文的模型调用全部指向本机 vLLM；机器上不需要、也不要设置任何 API key 或 token。
@@ -42,7 +42,7 @@
 ```bash
 nvidia-smi                       # 先看 GPU 型号、显存与 CUDA Version（≥ 12.8）
 cd /root/autodl-tmp              # AutoDL 的数据盘；其他机器换成空间足够的目录
-git clone --branch phase9-verification https://github.com/IntheFesh/Agent2.git
+git clone --branch main https://github.com/IntheFesh/Agent2.git   # 或为 Phase 15 新开的分支；phase9-verification 合入 main 之前用它
 cd Agent2
 git submodule update --init third_party/agent-world-model third_party/AgentFly
 git submodule status

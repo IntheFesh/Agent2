@@ -1,41 +1,54 @@
 # LIMITATIONS — 未验证项与已知限制
 
-本文件如实列出本仓库**没有做到**或**没有验证**的部分（R8）。标注 UNVERIFIED-LOCAL 的项目在开发环境中无法验证；表中写明了验证所需的资源和步骤。开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9），之后在真实环境中验证过的项目移到本节末尾的"已验证"列表。
+本文件如实列出本仓库**没有做到**或**没有验证**的部分（R8）。
 
-## 1. UNVERIFIED-LOCAL 项
+- §1 是验证状态，分两节：1.1 为仍未验证的项目（UNVERIFIED-LOCAL），写明原因与验证所需的资源和步骤；1.2 为已在真实环境中验证过的项目，附日期、机器类型与日志路径。
+- §2–§6 是已知限制，与是否验证无关。
+
+开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9）。本文件的状态截至 2026-09-25 本轮（TASK_v2 Phase 9–15）收尾。
+
+## 1. 验证状态
+
+### 1.1 未验证
+
+U1、U3、U4、U5、U8 都需要 GPU 机器，原因相同：**Phase 15 runbook 已就绪（`docs/runbooks/phase15-gpu.md`），仓库主人尚未在 GPU 机器上执行**（`user-decisions.md` D22）。以后仓库主人在新分支上单独执行 Phase 15，回贴日志后另提一个小 PR。U9 的原因不同，见表。
 
 | # | 项目 | 本仓库提供了什么 | 为什么没验证 | 验证所需资源与步骤 |
 |---|---|---|---|---|
-| U1 | 用 vLLM 服务 Arctic-AWM | `configs/serving/arctic-awm-4b.yaml`、`scripts/serve_vllm.sh`、`workbench serve vllm-cmd`、compose 中的 `vllm` 服务（`gpu` profile） | 无 GPU。按仓库主人的决定（`user-decisions.md` D11，ADR-020），profile 自 2026-09-24 起启用 `--enable-auto-tool-choice --tool-call-parser hermes`：模型 chat template 的 `<tool_call>{...}</tool_call>` 格式与 vLLM v0.19.0 `hermes` parser 的解析格式一致；不带 `tools` 的请求（`awm agent` 的文本协议）`tool_choice` 保持 `"none"`，parser 不参与（均为读源码的结论，RECON "Phase 12.5 报告之后"）。仍待验证：真实服务上 act 请求能否得到原生工具调用；未设 reasoning parser，思考内容中若出现 `<tool_call>` 会被误解析。`docker-compose.yml` 的 `vllm` 服务已按 D16 同步这两个参数，由单测防止漂移 | Linux x86_64 + CUDA GPU、HF 访问。Phase 15 中执行 `scripts/serve_vllm.sh`，再用 `WORKBENCH_LLM__BACKEND=vllm` 运行 `workbench agent run`，并用 `awm agent`（不带 `tools`）确认文本协议不受影响。逐条命令见 `docs/runbooks/phase15-gpu.md` §3.3–§3.6；其中 `workbench serve probe` 各发 1 个原生 tools 请求和 1 个 `awm agent` 文本协议请求，报告服务返回的是原生 `tool_calls` 还是文本 |
-| U3 | train 环境安装 | `train/pyproject.toml`、`train/uv.lock`（只锁定；`uv lock --check` 通过） | 需要 CUDA；`flash-attn` 只有源码包，要在本机用 nvcc 编译（torch 2.10.0 没有预编译 wheel）。构建环境里的 torch 已固定为锁定版本（ADR-027），否则 uv 会装最新的 torch | GPU 机器上执行 `cd train && uv sync`：runbook §3.1（15A，不装 flash-attn）与 §4.2（15B，完整安装） |
-| U4 | veRL 嵌套子模块与 Hydra 组合 | `check_override_keys`（静态键检查，曾在 scratch 中针对 fork @001f000 实测）、`hydra_compose_check` | 嵌套子模块默认不初始化（SSH URL）；Hydra 只在 train 环境中存在 | `git -C third_party/AgentFly submodule update --init verl`，然后 `workbench train preflight`。runbook §4.1（经 HTTPS 克隆，不改 `.gitmodules`）与 §4.4 |
-| U5 | smoke 训练运行 | `configs/train/smoke.yaml`、`workbench train launch --execute`（产物标 `NO_RESULTS`） | 无 GPU | 单卡 CUDA GPU（preflight 默认要求至少 12000 MiB 可用显存）+ U3 + U4。runbook §4.6：只记录是否跑通、峰值显存与耗时 |
-| U8 | `awm agent` / `awm verify` 各跑一次单任务 | 已于 2026-09-24 用 DeepSeek（`deepseek-flash`）各执行 1 次：`awm verify --mode sql` 链路打通；`awm agent` 的 LLM 调用、文本解析与 MCP 工具清单打通（`docs/verification/2026-09-24-llm-chain.md` §4–5） | **部分验证**：`awm agent` 第 2 轮 DeepSeek 在纯文本中输出了它自己的 DSML 工具调用标记，AWM 只识别 `<tool_call>`（`awm/core/agent.py:130-167`），循环提前结束，没有执行任何写操作；按 D3 不改上游、不写适配器 | 一个原生遵循 `<tool_call>` 文本协议的模型端点（例如经 vLLM 服务的 Arctic-AWM，见 U1），用 `--mcp_url` 模式再执行一次（`--scenario` 自动起服有上游缺陷，见 §6）。runbook §3.6–§3.7：`awm agent` 连本机 vLLM，`awm verify` 用 `--mode code`（不需要裁判） |
-| U9 | 合成流水线的 `gen scenario` 步骤 | `workbench synth run` 的完整模式（不加 `--scenario-file`，从 `gen scenario` 开始） | 本轮没有 embedding 端点：DeepSeek 不提供 embedding 接口（ADR-021）。其余 6 个步骤、断点续跑、缓存、账本与 `check_all` 已于 2026-09-24 真实执行（见下方已验证项） | 一个 OpenAI 兼容的 embedding 端点（AWM 默认用 `text-embedding-3-large`，`awm/core/scenario.py:40-43`）与 `EMBEDDING_OPENAI_API_KEY`；用 `--scenarios 1` 试跑完整模式 |
+| U1 | 用 vLLM 服务 Arctic-AWM | `configs/serving/arctic-awm-4b.yaml`、`scripts/serve_vllm.sh`、`workbench serve vllm-cmd`、`workbench serve probe`、compose 中的 `vllm` 服务（`gpu` profile）。按 D11（ADR-020），profile 启用 `--enable-auto-tool-choice --tool-call-parser hermes`，compose 已按 D16 同步，由单测防止漂移。依据是读源码：模型 chat template 的 `<tool_call>{...}</tool_call>` 格式与 vLLM v0.19.0 `hermes` parser 的解析格式一致；不带 `tools` 的请求（`awm agent` 的文本协议）`tool_choice` 保持 `"none"`，parser 不参与（RECON "Phase 12.5 报告之后"） | Phase 15 runbook 已就绪（`docs/runbooks/phase15-gpu.md`），仓库主人尚未在 GPU 机器上执行。待在真实服务上确认：act 请求能否得到原生工具调用；没有设置 reasoning parser，思考内容中出现 `<tool_call>` 时会不会被误解析 | Linux x86_64、24 GB CUDA 显卡（驱动支持 CUDA ≥ 12.8）、Hugging Face 或其镜像站。runbook §3.3–§3.6：启动服务，`workbench serve probe` 各发 1 个原生 tools 请求和 1 个文本协议请求，再用 `WORKBENCH_LLM__BACKEND=vllm` 运行 1 次 `workbench agent run` |
+| U3 | train 环境安装 | `train/pyproject.toml`、`train/uv.lock`（只锁定；`uv lock --check` 通过）；flash-attn 的构建环境固定使用锁定的 torch（ADR-027） | Phase 15 runbook 已就绪（`docs/runbooks/phase15-gpu.md`），仓库主人尚未在 GPU 机器上执行。安装需要 CUDA；flash-attn 只有源码包，也没有对应 torch 2.10.0 的预编译 wheel，要在本机用 nvcc 编译 | runbook §3.1（15A，不装 flash-attn）与 §4.2（15B，完整安装：A100 级显卡、nvcc 12.x、至少 64 GB 内存） |
+| U4 | veRL 嵌套子模块与 Hydra 组合 | `check_override_keys`（静态键检查，曾在 scratch 中针对 fork @001f000 实测）、`hydra_compose_check`。经 HTTPS 初始化嵌套子模块的命令已在开发容器中对 AgentFly 的本地克隆原样执行过（RECON "Phase 15 runbook"），但 Hydra 组合没有在 train 环境中执行过 | Phase 15 runbook 已就绪（`docs/runbooks/phase15-gpu.md`），仓库主人尚未在 GPU 机器上执行。Hydra 只存在于 train 环境中（依赖 U3） | runbook §4.1（经 HTTPS 克隆，不改 `.gitmodules`）与 §4.4（`workbench train preflight`） |
+| U5 | smoke 训练运行 | `configs/train/smoke.yaml`、`workbench train launch --execute`（产物标 `NO_RESULTS`），训练进程只拿白名单环境变量（ADR-026） | Phase 15 runbook 已就绪（`docs/runbooks/phase15-gpu.md`），仓库主人尚未在 GPU 机器上执行 | 单卡 CUDA GPU（preflight 要求至少 12000 MiB 可用显存）+ U3 + U4。runbook §4.6：只记录是否跑通、峰值显存与耗时 |
+| U8 | `awm agent` / `awm verify` 各跑一次单任务 | 2026-09-24 用 DeepSeek（`deepseek-flash`）各执行过 1 次：`awm verify --mode sql` 链路打通；`awm agent` 的 LLM 调用、文本解析与 MCP 工具清单打通（见 1.2）。`workbench verify`（ADR-025）让 `awm verify` 拿不到 key | **部分验证**：`awm agent` 第 2 轮 DeepSeek 在纯文本中输出了它自己的 DSML 工具调用标记，AWM 只识别 `<tool_call>`（`awm/core/agent.py:130-167`），循环提前结束，没有执行写操作；按 D3 不改上游、不写适配器。剩下的一半需要一个原生遵循 `<tool_call>` 文本协议的端点：Phase 15 runbook 已就绪（`docs/runbooks/phase15-gpu.md`），仓库主人尚未在 GPU 机器上执行 | 经 vLLM 服务的 Arctic-AWM（U1），用 `--mcp_url` 模式再执行一次（`--scenario` 自动起服有上游缺陷，见 §6）。runbook §3.6–§3.7：`awm agent` 连本机 vLLM，`awm verify` 用 `--mode code`（不需要裁判） |
+| U9 | 合成流水线的 `gen scenario` 步骤 | `workbench synth run` 的完整模式（不加 `--scenario-file`，从 `gen scenario` 开始） | 本轮没有 embedding 端点：DeepSeek 不提供 embedding 接口（ADR-021）。其余 6 个步骤已真实执行（见 1.2） | 一个 OpenAI 兼容的 embedding 端点（AWM 默认用 `text-embedding-3-large`，`awm/core/scenario.py:40-43`）与 `EMBEDDING_OPENAI_API_KEY`；用 `--scenarios 1` 试跑完整模式 |
 
-CI（`.github/workflows/ci.yml`）已在 GitHub Actions 上运行并通过（run 9，提交 `bbb541c`），因此不列为未验证项。此前 run 4–8 失败，原因分别是 detect-secrets 误报和 loguru 在 CI 中强制彩色输出，均已修复。
+### 1.2 已验证
 
-已于 2026-09-24 在真实环境验证、不再列为未验证项的：
+以下项目已在真实环境中执行过。其中的数字都是单次测量的工程事实；链路演示只证明"打通"，不构成评测（N2）。机器类型只写平台，不写主机名。
 
+- **CI**：`.github/workflows/ci.yml` 在 GitHub Actions 上执行 lint、secrets、test、number guard 与 doctor 并通过。Phase 8 末的 run 9（提交 `bbb541c`）首次通过，此前 run 4–8 的失败（detect-secrets 误报、loguru 在 CI 中强制彩色输出）都已修复；Phase 9 核对 `f140123` 的 run 10 通过。本轮每次推送后都检查了 CI，失败过的 run 27（测试依赖时间窗口）与 run 29（detect-secrets 拦下日志中的提交哈希）都已修复。
+  - 日期：2026-09-24 起；机器：GitHub 托管 runner（`ubuntu-latest`）；证据：`docs/verification/2026-09-24-preflight.md` §2。本轮最后一次提交的运行结果见 `phase9-verification` → `main` 的 PR。
 - **Docker 镜像构建与 compose 启动（原 U6）**：
   - 本机 `dockerd` 能启动，但 Docker Hub 返回 429，按 D15 改在 GitHub Actions 托管 runner 上验证。
-  - `.github/workflows/docker-smoke.yml` 在 push 到 `phase9-verification` 与 `main` 时运行 `scripts/docker_smoke.py`：构建，启动（不带 `gpu` profile），经 HTTP API 走完"查询 → 写操作 → 审批 → 完成"，最后停止。
-  - 2026-09-24 的两次运行都通过（run 1 提交 `5419a2c`，run 2 提交 `c2a8a08`）。
+  - `.github/workflows/docker-smoke.yml` 在 push 到 `phase9-verification` 与 `main` 时运行 `scripts/docker_smoke.py`：构建，启动（不带 `gpu` profile），经 HTTP API 走完"查询 → 写操作 → 审批 → 完成"，最后停止。2026-09-24 的两次运行都通过（run 1 提交 `5419a2c`，run 2 提交 `c2a8a08`）。
   - 只有一个约 880 MB 的镜像，`app` 与 `env-manager` 共用；构建分别用了 15.9 s 与 23.0 s，冷启动 13.4 s 与 15.0 s。这些是单次测量，随 runner 变化。
   - `gpu` profile 仍未验证（U1）。
-
-  机器：GitHub 托管 runner `ubuntu-24.04`。证据：`docs/verification/2026-09-24-docker-smoke.md`，日志 `docs/verification/logs/2026-09-24-phase14-docker-smoke.log`。
-- **官方数据集下载与接入（原 U7）**：`make data` 匿名下载 revision `dde80a0`，8 个文件齐全，条目数与数据集卡一致；`workbench doctor` 的 dataset 一项为 ok；官方 `e_commerce_33` 经 env-manager 真实启动，`list_tools` 返回 39 个工具。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-dataset.md`，日志 `docs/verification/logs/2026-09-24-phase11.log`。
-- **真实 LLM 驱动的智能体（原 U2）**：`openai_compat` 后端接 DeepSeek（`deepseek-flash`，key 只从环境变量读取），`workbench doctor` 的 llm 一项为 ok；在官方 `e_commerce_33` 任务 0 上执行 1 次 `workbench agent run`，走完"规划 → 读工具 → 审批 → 写工具 → 回答"，DB diff 为 `cart_items` 新增 1 行。单次链路演示，不构成评测。Phase 12.5 的修复完成后，在同一任务上用默认预算再执行了 1 次（提交 `f135189`，WALKTHROUGH §5.3），链路仍然打通。vLLM 后端仍未验证（U1）。机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-llm-chain.md`，日志 `docs/verification/logs/2026-09-24-phase12-*.log`。
-- **`awm verify --mode sql` 单次执行（U8 的一半）**：执行官方 verifier 并由 DeepSeek 裁判，写出 `verify.sql.json`；UI 轨迹查看器能渲染这次 `awm agent` 的真实 `trajectory.json`。证据同上。
-- **合成流水线真实执行（原 U9 除 `gen scenario` 外的部分）**：2026-09-24 用 DeepSeek（`deepseek-flash`）经本地代理执行 1 次 `workbench synth run --scenario-file … --execute`，场景为手写的 `local_it_service_desk`（D5）。结果：
+  - 日期：2026-09-24；机器：GitHub 托管 runner（`ubuntu-24.04`）；证据：`docs/verification/2026-09-24-docker-smoke.md`，日志 `docs/verification/logs/2026-09-24-phase14-docker-smoke.log`。
+- **官方数据集下载与接入（原 U7）**：`make data` 匿名下载 revision `dde80a0`，8 个文件齐全，条目数与数据集卡一致；`workbench doctor` 的 dataset 一项为 ok；官方 `e_commerce_33` 经 env-manager 真实启动，`list_tools` 返回 39 个工具。
+  - 日期：2026-09-24；机器：Claude Code 云端容器（Linux x86_64，无 GPU）；证据：`docs/verification/2026-09-24-dataset.md`，日志 `docs/verification/logs/2026-09-24-phase11.log`。
+- **真实 LLM 驱动的智能体（原 U2）**：`openai_compat` 后端接 DeepSeek（`deepseek-flash`，key 只从环境变量读取），`workbench doctor` 的 llm 一项为 ok；在官方 `e_commerce_33` 任务 0 上执行 1 次 `workbench agent run`，走完"规划 → 读工具 → 审批 → 写工具 → 回答"，DB diff 为 `cart_items` 新增 1 行。Phase 12.5 的修复完成后，在同一任务上用默认预算再执行了 1 次（提交 `f135189`，WALKTHROUGH §5.3），链路仍然打通。vLLM 后端仍未验证（U1）。
+  - 日期：2026-09-24；机器：Claude Code 云端容器（Linux x86_64，无 GPU）；证据：`docs/verification/2026-09-24-llm-chain.md`，日志 `docs/verification/logs/2026-09-24-phase12-workbench-agent.log` 与 `docs/verification/logs/2026-09-24-phase12.5-workbench-agent.log`（各附 trace）。
+- **`awm agent` 与 `awm verify --mode sql` 的单次执行（U8 已验证的一半）**：`awm verify` 执行官方 verifier 并由 DeepSeek 裁判，写出 `verify.sql.json`；`awm agent` 的 LLM 调用、文本解析与 MCP 工具清单打通；UI 轨迹查看器能渲染这次 `awm agent` 的真实 `trajectory.json`。
+  - 日期：2026-09-24；机器：Claude Code 云端容器（Linux x86_64，无 GPU）；证据：`docs/verification/2026-09-24-llm-chain.md` §4–§6，日志 `docs/verification/logs/2026-09-24-phase12-awm-agent.log`、`2026-09-24-phase12-awm-verify.log`、`2026-09-24-phase12-ui-viewer.log`。
+- **合成流水线真实执行（原 U9 除 `gen scenario` 外的部分）**：用 DeepSeek（`deepseek-flash`）经本地代理执行 1 次 `workbench synth run --scenario-file … --execute`，场景为手写的 `local_it_service_desk`（D5）。结果：
   - 从 `gen task` 到 `gen verifier` 的 6 个步骤都一次成功；
   - 故意中断后用同一命令续跑，6 个步骤按 checkpoint 跳过，只重做被中断的验证；
   - 缓存命中另用一次不带 key 的重放验证；
   - 账本逐条记账，上界口径 ¥1.2240；
   - `check_all` 报告 1 个环境启动成功、15 个工具。
-
-  机器：Claude Code 云端容器（Linux x86_64，无 GPU）。证据：`docs/verification/2026-09-24-synth.md`，日志 `docs/verification/logs/2026-09-24-phase13-synth.log`。
+  - 日期：2026-09-24；机器：Claude Code 云端容器（Linux x86_64，无 GPU）；证据：`docs/verification/2026-09-24-synth.md`，日志 `docs/verification/logs/2026-09-24-phase13-synth.log`。
+- **合成 runner 在步骤中途被中断后续跑（Phase 14，零成本）**：用真实 AWM 的 gen 步骤与本地回放的上游重做 Phase 13 的中断。中断落在 `gen env` 中间，没有进程残留；同一命令续跑后 `env` 由缓存重放，确定性的输出与 Phase 13 一致（`db_path` 除外）。预算熔断与上游错误的判定由离线测试覆盖（ADR-023、ADR-024）。
+  - 日期：2026-09-24；机器：Claude Code 云端容器（Linux x86_64，无 GPU）；证据：`docs/verification/2026-09-24-phase14-synth-resilience.md`，日志 `docs/verification/logs/2026-09-24-phase14-synth-resilience.log`。
 
 ## 2. 数字与许可证
 
@@ -102,7 +115,7 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 
     正则扫描排除不了动态访问。仓库主人决定暂不轮换，自己检查 DeepSeek 后台的用量记录，Phase 13 结束后删除这把 key（`user-decisions.md` D12）。
   - **后续安排**（`user-decisions.md` D13、D18）：两项遗留缺口已作为 Phase 15 的前置修复完成：`awm verify` 经 `workbench verify` 运行（ADR-025），训练改用白名单（ADR-026）。
-  - **Phase 15 的 GPU 步骤**（D18、D21）：runbook 已写好（`docs/runbooks/phase15-gpu.md`），由仓库主人在自己租用的 GPU 机器上执行后回贴日志；在此之前 U1、U3、U4、U5、U8 保持现状。
+  - **Phase 15 的 GPU 步骤**（D18、D21、D22）：runbook 已写好（`docs/runbooks/phase15-gpu.md`）。按 D22，本轮不执行，U1、U3、U4、U5、U8 保持未验证（§1.1）；以后仓库主人在新分支上单独执行，回贴日志后另提 PR。
 - **合成步骤没有输出上限；预算熔断会在途超支**：
   - AWM 把 `max_tokens` 改名为 `max_completion_tokens` 发出（`awm/gpt.py:160-164`），DeepSeek 忽略这个参数（探针 P4），所以单个请求的输出只受服务端默认上限约束（思考模式 64K token）。
   - Phase 14 起，本地代理按账本累计费用做预算熔断（`synth.budget`，默认 ¥5，ADR-023）。检查发生在转发之前，已经转发、尚未返回的请求照常完成并计费，所以实际花费可能超过上限，超出部分最多是超限那一刻在途请求的费用之和。

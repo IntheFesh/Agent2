@@ -48,3 +48,5 @@ DeepSeek 官方价格页 `https://api-docs.deepseek.com/zh-cn/quick_start/pricin
 - Docker 冒烟在 GitHub Actions 上使用 mock LLM。
 
 回放运行的账本显示 ¥0.7306，这是按 Phase 13 已付费响应中的 `usage` 计价得到的数，不是新的花费（`docs/verification/2026-09-24-phase14-synth-resilience.md` §3）。**累计仍为 ¥3.1396。**
+
+**Phase 15 小计：¥0**。三项前置修复、`workbench serve probe`、`scripts/redact_paste.py` 与 runbook 全部离线完成，测试只用本地假服务端；GPU 步骤本轮未执行（D22）。本轮（TASK_v2 Phase 9–15）**最终累计：¥3.1396**（上界口径），低于 D4 的 ¥15 提示线与 N3 的 ¥30 上限。
