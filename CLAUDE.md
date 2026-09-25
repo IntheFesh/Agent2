@@ -55,7 +55,9 @@
   - TASK_v2 按 D22 没有执行；以后仓库主人在新分支上单独执行 Phase 15，回贴日志后另提一个小 PR。
 - TASK_v2 收尾（§4，2026-09-25）：LIMITATIONS §1 分为 1.1 未验证与 1.2 已验证（附日期、机器类型、日志路径）；README、CHANGELOG 与费用账本已同步；按 N5 从 `phase9-verification` 向 `main` 开 PR（PR #1，已合并）。
   - `workbench serve probe` 向 vLLM 各发 1 个原生 tools 请求和 1 个 `awm agent` 文本协议请求（U1）。
-- polish-v3 本轮（Phase 16–18，分支 `polish-v3`，D23–D25）：不调用任何付费 API，LLM 只用 mock，不做评测；Phase 18 之后按 `docs/process/TASK.md` §6 验收，再向 `main` 开 PR（已授权）。
+- polish-v3 本轮（Phase 16–18，分支 `polish-v3`，D23–D30）：不调用任何付费 API，LLM 只用 mock，不做评测；draft PR #4（`polish-v3` → `main`）已开，检查随 PR 运行；Phase 18 之后按 `docs/process/TASK.md` §6 验收，通过后按 D30 合并并删除 `polish-v3`。
   - Phase 16：自有代码按 MIT 授权，只覆盖本仓库文件（`third_party/`、数据集、模型各按各自条款）；任务书原文在 `docs/process/`（`TASK.md`、`TASK_v2.md`、本轮的 `TASK_v3.md`），数字守卫经 `configs/number_whitelist.yaml` 的 `skip_files` 只豁免这三份（ADR-028、D28）；
-  - README 首屏的两张截图由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成，UI 改动后重新生成；docker-smoke 只在 push 到 `main` 与以 `main` 为目标的 PR 上运行（D27），工作分支的检查随其 PR 运行。
+  - README 首屏的三张截图（审批卡片、DB diff、整页）由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成，UI 改动后重新生成；docker-smoke 只在 push 到 `main` 与以 `main` 为目标的 PR 上运行（D27），工作分支的检查随其 PR 运行。
+  - Phase 17（ADR-029，D29）：write/destructive 调用进入审批前，env-manager 从会话**当前**数据库的在线备份起影子环境预演同一调用（`<run_dir>/previews/<id>/`，用完即回收，不占 `max_envs`，并发受 `env.max_previews` 限制）；`approval.require_preview` 默认 `{write: false, destructive: true}`，为 true 时预演失败只能拒绝，为 false 时令牌绑定 `preview_unavailable`、UI 标"未预演"；
+  - 预演记录由网关用审批密钥签名，令牌绑定工具、参数摘要与预演 digest；批准后在真实调用前后取改动，只做结构比对（表、主键、改动的列名），时间列只记录不比对，结果 `preview_check` 写入审计；超时 30 秒来自 `scripts/measure_preview.py` 的实测（`docs/verification/logs/2026-09-25-preview-timing.log`）。
 - 改动 README 或 docs 后运行 `make check-numbers` 与 `make check-links`（`make lint` 已包含后者）；改动 registry 后运行 `make results`。

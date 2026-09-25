@@ -5,7 +5,7 @@
 - §1 是验证状态，分两节：1.1 为仍未验证的项目（UNVERIFIED-LOCAL），写明原因与验证所需的资源和步骤；1.2 为已在真实环境中验证过的项目，附日期、机器类型与日志路径。
 - §2–§6 是已知限制，与是否验证无关。
 
-开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9）。本文件的状态截至 2026-09-25 本轮（TASK_v2 Phase 9–15）收尾。
+开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9）。本文件的状态截至 2026-09-25：TASK_v2（Phase 9–15）收尾，以及 polish-v3 的 Phase 16–17（审批前预演的限制见 §6）。
 
 ## 1. 验证状态
 
@@ -148,3 +148,17 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
 - **长期记忆的 TTL 精度为秒级**（LangGraph `SqliteStore` 的实现）。
 - **上游缺陷未修复**：veRL fork @001f000 中残留合并冲突标记（RECON §10）；AgentFly 示例脚本使用了 fork 中不存在的 Hydra 键。`awm agent --scenario` 自动起服在结束时必然抛出 `shutil.SameFileError`（工作库本身就是 `<output_dir>/final.db`，结束时又复制到同一路径：`awm/core/server.py:70-82`、`awm/core/agent.py:596-598`），而且会把服务代码写到 `--envs_path` 所在目录、只终止启动器进程；本仓库的演示改用 `--mcp_url` 模式（`docs/verification/2026-09-24-llm-chain.md` §4）。按 R5 不修改上游，仅在文档中记录，smoke 配置绕开了这些问题。
 - **沙箱的 PID 1 不回收僵尸进程**：compose 中设置了 `init: true`；直接在类似环境中运行时，进程组清理后可能残留僵尸条目（不占资源）。
+- **审批前预演（Phase 17，ADR-029）是尽力而为的结构比对**：
+  - 比对只看改动的表、主键和改动的列名。时间列（类型、默认值、列名三条规则）只记录、不比对；主键不是 INTEGER rowid 别名的表，新增行只比对行数。规则依据官方数据集的统计（RECON §10 "Phase 17"），不保证覆盖所有写法：
+    - 用随机值给 INTEGER 主键赋值的 server，会被误报为 `preview_mismatch`；
+    - 列名不像时间、却由 server 按当前时间写入的列，会被当成普通列比对，可能误报；
+    - 误报都会记入审计并在 UI 标出，但不会阻止已经批准的调用。
+  - 预演会把生成的代码再执行一次：数据库以外的副作用（外部请求、写文件）会发生两次。官方 1000 个环境中只有 1 个用到 `httpx`，没有 `requests`、`subprocess`、`os.system`（RECON）。
+  - 预演之后、真实执行之前，如果会话数据库被别的调用改动，真实改动可能与预演不同（例如新行的主键），比对会如实报 `preview_mismatch`。正常流程中同一会话的调用是串行的，不会出现这种情况。
+  - 耗时与资源：每个需要审批的调用都要多等一次影子 server 启动，本机实测总耗时中位数为 3.7 秒（迷你夹具）和 4.3 秒（官方 `e_commerce_33`），日志见 `docs/verification/logs/2026-09-25-preview-timing.log`；超时为 30 秒。同时运行的预演数受 `env.max_previews` 限制（默认 2），多出的排队等待，等待时间计入超时。
+  - 预演记录用审批密钥签名：
+    - 网关在内存中只保留最近 256 条记录，checkpoint 中的副本在批准时重新验证；
+    - 进程重启且没有固定 `WORKBENCH_APPROVAL_SECRET` 时，挂起中、要求预演的审批只能拒绝后重新发起。
+  - 独立运行的 `workbench gateway serve` 只有在配置了 `env.manager_url` 时才能预演；否则按默认的 `require_preview`，destructive 调用在那里无法批准。
+  - 审批卡片每类最多显示 `approval.preview_max_rows` 行（默认 20），比对使用全部的键。
+

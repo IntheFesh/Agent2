@@ -40,5 +40,6 @@
 | 阶段 | 变更 | 主要提交 |
 |---|---|---|
 | Phase 16 | 自有代码按 MIT 授权（`LICENSE`、pyproject 的 `license`、README"许可证"一节）；`scripts/demo_ui_check.py` 生成 README 的两张 mock 演示截图；README 首屏加 CI 徽章、"本仓库做了什么 / 上游提供了什么"与真实仓库地址；任务书移至 `docs/process/`，数字守卫按文件豁免（ADR-028）；新增相对链接检查（`make lint` 与 CI）；docker-smoke 也在 `polish-v3` 上运行 | `ff0d19e`、`782581a`、`dcfaf7b`、`3516b65`、`552cb5a`、`47b9b8e` |
+| Phase 17 | 前置：docker-smoke 改为在 push 到 `main` 与以 `main` 为目标的 PR 上运行（D27），开 draft PR #4；保存本轮任务原文 `TASK_v3.md` 并加入数字守卫豁免（D28）。审批前预演（ADR-029，D29）：write/destructive 调用进入审批前，env-manager 从会话当前数据库的在线备份起影子环境执行同一调用，算出行级改动后回收；`approval.require_preview` 按风险级别配置（默认 `{write: false, destructive: true}`）；预演记录经签名，令牌绑定工具、参数摘要与预演 digest；批准后按结构比对真实改动（时间列只记录不比对），`preview_mismatch` 写入审计并在 UI 标出；审批卡片显示"将要改动的行"，预演失败时显示原因或"未预演"；`scripts/measure_preview.py` 实测各阶段耗时，据此把超时设为 30 秒；docker-smoke 断言审批请求带预演 diff；README 增加整页截图 | `2ed047f`、`d06f3f1`、`482a129`、`eb2f214`、`01a9110`、`b47e499`、`128826a`、`bd2571a`、`d053595`、`9edd9b5` 与本行所在的文档提交 |
 
 费用：¥0（没有调用任何外部付费 API）。
