@@ -56,6 +56,6 @@
 - TASK_v2 收尾（§4，2026-09-25）：LIMITATIONS §1 分为 1.1 未验证与 1.2 已验证（附日期、机器类型、日志路径）；README、CHANGELOG 与费用账本已同步；按 N5 从 `phase9-verification` 向 `main` 开 PR（PR #1，已合并）。
   - `workbench serve probe` 向 vLLM 各发 1 个原生 tools 请求和 1 个 `awm agent` 文本协议请求（U1）。
 - polish-v3 本轮（Phase 16–18，分支 `polish-v3`，D23–D25）：不调用任何付费 API，LLM 只用 mock，不做评测；Phase 18 之后按 `docs/process/TASK.md` §6 验收，再向 `main` 开 PR（已授权）。
-  - Phase 16：自有代码按 MIT 授权，只覆盖本仓库文件（`third_party/`、数据集、模型各按各自条款）；任务书原文在 `docs/process/`，数字守卫经 `configs/number_whitelist.yaml` 的 `skip_files` 只豁免这两份（ADR-028）；
+  - Phase 16：自有代码按 MIT 授权，只覆盖本仓库文件（`third_party/`、数据集、模型各按各自条款）；任务书原文在 `docs/process/`（`TASK.md`、`TASK_v2.md`、本轮的 `TASK_v3.md`），数字守卫经 `configs/number_whitelist.yaml` 的 `skip_files` 只豁免这三份（ADR-028、D28）；
   - README 首屏的两张截图由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成，UI 改动后重新生成；docker-smoke 只在 push 到 `main` 与以 `main` 为目标的 PR 上运行（D27），工作分支的检查随其 PR 运行。
 - 改动 README 或 docs 后运行 `make check-numbers` 与 `make check-links`（`make lint` 已包含后者）；改动 registry 后运行 `make results`。
