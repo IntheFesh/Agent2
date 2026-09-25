@@ -92,13 +92,16 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
   - **只隔离了环境变量**。子进程与 workbench 以同一用户运行，仍能读取该用户可读的文件，例如 `.env`、`~/.aws/credentials`。要隔离这些文件，需要另一个用户或容器沙箱。
   - **白名单是固定的**，没有配置开关。
   - **`awm agent --scenario` 自动起服**时，server 会继承 `awm agent` 的环境，其中含 key（`awm/core/server.py:174-195`）。本仓库只用 `--mcp_url` 模式。
-  - **训练进程不在本次修复范围内**。`workbench train launch` 与 preflight 仍继承完整环境；smoke 训练的 `calculator` 工具用 sympy 的 `sympify` 解析模型输出（`agentfly/tools/src/calculate/tools.py:20`），而 `sympify` 内部使用 `eval`（sympy 1.14.0 `sympy/core/sympify.py:138-139`）。这些都未在 GPU 上验证（U5）。
+  - **训练进程**（Phase 15 起，ADR-026）：`workbench train launch` 与 preflight 的探针只拿到 `train_env()`，即基础变量、代理设置，以及 CUDA、NCCL、PyTorch、vLLM、Ray、veRL、Hugging Face 等按名称或前缀放行的变量，不含任何名字像凭据的变量。仍然存在的限制：
+    - 按前缀放行比只按名称放行宽；
+    - 白名单是否够用只能在 GPU 机器上验证（U5）。缺了变量时，可以加到 `train.env_passthrough`；
+    - smoke 训练的 `calculator` 工具用 sympy 的 `sympify` 解析模型输出（`agentfly/tools/src/calculate/tools.py:20`），`sympify` 内部使用 `eval`（sympy 1.14.0 `sympy/core/sympify.py:138-139`）。训练进程读不到凭据类环境变量，但仍能读到该用户可读的文件。
   - **Phase 12 的 env server（官方 `e_commerce_33`）是在修复前启动的**，当时进程环境里有 `DEEPSEEK_API_KEY`。离线用正则扫描了官方全部 1000 个场景的代码（上面日志的 §3），结果如下：
     - 所有场景只按字面名读取 `PORT`、`HOST`、`DATABASE_PATH`，没有整体访问 `os.environ`；
     - `e_commerce_33` 没有 import 任何网络库。
 
     正则扫描排除不了动态访问。仓库主人决定暂不轮换，自己检查 DeepSeek 后台的用量记录，Phase 13 结束后删除这把 key（`user-decisions.md` D12）。
-  - **后续安排**：仓库主人决定（`user-decisions.md` D13），`awm verify` 经本地代理只拿占位 key、`workbench train launch` 改用白名单这两项不在当前阶段做。如果执行 Phase 15，这两项作为它的前置修复先完成；否则保留在这里。
+  - **后续安排**（`user-decisions.md` D13、D18）：两项遗留缺口已作为 Phase 15 的前置修复完成：`awm verify` 经 `workbench verify` 运行（ADR-025），训练改用白名单（ADR-026）。
 - **合成步骤没有输出上限；预算熔断会在途超支**：
   - AWM 把 `max_tokens` 改名为 `max_completion_tokens` 发出（`awm/gpt.py:160-164`），DeepSeek 忽略这个参数（探针 P4），所以单个请求的输出只受服务端默认上限约束（思考模式 64K token）。
   - Phase 14 起，本地代理按账本累计费用做预算熔断（`synth.budget`，默认 ¥5，ADR-023）。检查发生在转发之前，已经转发、尚未返回的请求照常完成并计费，所以实际花费可能超过上限，超出部分最多是超限那一刻在途请求的费用之和。

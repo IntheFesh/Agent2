@@ -614,3 +614,13 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
 - **上游错误的重试层次**（ADR-024）：
   - openai SDK 2.38.0：异步客户端把 402 映射为 `APIStatusError`（`openai/_client.py:1081-1112`）；`_should_retry` 只重试 408、409、429、5xx 与带 `x-should-retry` 头的响应（`openai/_base_client.py:795-826`）；默认重试 2 次（`openai/_constants.py:10`）；
   - AWM `GPTClient`：共尝试 3 次，最后返回空的 refusal completion（`awm/gpt.py:168-206`）。
+- **训练栈读取的环境变量**（ADR-026）：
+  - AgentFly @`1256586`：
+    - `agentfly/__init__.py:16-47` 读取 `XDG_CACHE_HOME`、`AGENT_DATA_DIR`、`AGENT_CONFIG_DIR`、`TOOL_ERROR_AS_OBSERVATION`，并自己设置 `TOKENIZERS_PARALLELISM=false`、`VLLM_CONFIGURE_LOGGING=1`；
+    - `agents/agent_base.py:155-171` 读取 `REWARD_DECOMPOSITION`、`REWARD_DECOMPOSITION_GAMMA`；
+    - `resources/containers/ray_container_resource.py:47` 读取 `AGENTFLY_RAY_GET_DEFAULT_TIMEOUT_SEC`；
+    - 检索、ALFWorld、enroot、代码沙箱等工具另有自己的变量，smoke 配置不用这些工具。
+  - veRL fork @`001f000`（`Agent-One-Lab/verl`，按 HTTPS 只读检出到 scratch 后检索 `os.environ` / `os.getenv`）：
+    - 出现最多的是 `VERL_LOGGING_LEVEL`（81 处）；
+    - 其余包括 `RANK`、`LOCAL_RANK`、`WORLD_SIZE`、`MASTER_ADDR`、`MASTER_PORT`、`NCCL_*`、`CUDA_*`、`TORCH_*`、`CUBLAS_WORKSPACE_CONFIG`、`FLASH_ATTENTION_DETERMINISTIC`，以及跟踪器相关的 `WANDB_ENTITY`、`MLFLOW_*`、`SWANLAB_API_KEY`、`VOLC_ACCESS_KEY_ID`、`VOLC_SECRET_ACCESS_KEY`。
+  - smoke profile 的 `trainer.logger` 为 `['console']`（`configs/train/smoke.yaml`），不需要任何跟踪器的 key。
