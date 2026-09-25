@@ -727,3 +727,19 @@ print("columns by rule:", dict(reasons))
 print("server code (occurrences / scenarios):", {k: (code[k], scen[k]) for k in patterns})
 ```
 
+
+### Phase 18（2026-09-25）：审批策略用到的事实
+
+pydantic 2.12.5（pydantic-core 2.41.5），PyYAML 6.0.3，Python 3.12.3。
+
+- **pydantic 的未知字段**：
+  - `ConfigDict(extra="forbid")`（`pydantic/config.py:63`，默认是 `'ignore'`）让未声明的字段报错，错误类型为 `extra_forbidden`（`pydantic_core/core_schema.py:4234`）；
+  - `ValidationError.errors()` 的每一项带 `type`、`loc`（字段路径的元组）与 `msg`，`workbench.gateway.approval_policy` 据此拼出 `rules[0] (id x).args.quantity.lte` 这样的 YAML 路径；
+  - 实测：同一个模型的错误先列声明过的字段，未知字段排在后面（`tests/unit/test_approval_policy.py::test_schema_errors_name_every_problem`）；
+  - `BeforeValidator`（`pydantic/functional_validators.py:91`）中抛出的 `ValueError` 以 "Value error, " 开头，加载器去掉这个前缀。
+  - 为了不让 `True` 或 `"5"` 被悄悄转成数字，数值字段用 `BeforeValidator` 显式检查类型，不依赖 pydantic 的宽松转换。
+- **glob 匹配**：
+  - `fnmatch.fnmatchcase`（`/usr/lib/python3.12/fnmatch.py:64-71`）区分大小写；
+  - 模式被转换成以 `\Z` 结尾的正则（`:185`），用 `match` 从头匹配，所以是整名匹配：`e_commerce_*` 不匹配 `mini_e_commerce`；
+  - `*` 可以匹配 `_`。
+- **YAML**：`yaml.safe_load` 读取策略文件；空文件得到 `None`，按 `{}` 校验，报"version: Field required"。
