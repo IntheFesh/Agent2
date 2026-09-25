@@ -11,5 +11,5 @@
 9. ~~**DeepSeek 思考模式的 `reasoning_content` 回传**~~：Phase 12.5 在 LLM 层实现（ADR-017）；按仓库主人的决定不加 `extra_body` 开关，也不改智能体状态。
 10. **trace 中记录输入 / 输出 token 的拆分**：`llm` 事件目前只有合计值，花费账本只能把全部 token 按输出单价计。记录 `prompt_tokens`、`completion_tokens` 以及服务商返回的缓存命中字段，账本可以更准确。
 11. ~~**风险分级结合 HTTP 方法**~~：已在 Phase 12.5 实现（ADR-015）。
-12. **`awm verify` 只拿占位 key**：像合成流水线那样经本地代理运行 `awm verify --mode sql`，上游 key 只留在代理所在的进程里。这样 verifier 代码读不到真实 key，只能经代理发起调用，也不需要改上游（见 ADR-019 的限制）。仓库主人决定：若执行 Phase 15，本项与 `train launch` 的白名单作为其前置修复（`user-decisions.md` D13）。
+12. **`awm verify` 只拿占位 key**（已在 Phase 15 实现：`workbench verify`，ADR-025）：像合成流水线那样经本地代理运行 `awm verify --mode sql`，上游 key 只留在代理所在的进程里。这样 verifier 代码读不到真实 key，只能经代理发起调用，也不需要改上游（见 ADR-019 的限制）。仓库主人决定：若执行 Phase 15，本项与 `train launch` 的白名单作为其前置修复（`user-decisions.md` D13）。
 13. **生成代码的进程级沙箱**：env server 与 check_all 以另一个用户或在容器中运行，连本用户可读的文件（`.env`、云凭据）也读不到；ADR-019 只隔离了环境变量。

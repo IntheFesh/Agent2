@@ -601,3 +601,16 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
   - 本机：`dockerd` 29.3.1 能启动。拉取 `python:3.12-slim` 时，`registry-1.docker.io` 返回 `429 Too Many Requests`（日志 `docs/verification/logs/2026-09-24-phase14-docker-smoke.log` §1）。
   - 沙箱说明（`/root/.ccr/README.md` "docker build / docker run"）：容器内的进程连不到出口代理，也不信任它的 CA。绕过需要在 Dockerfile 里安装沙箱 CA，而这项改动只对这个沙箱有意义。
   - GitHub 托管 runner：`ubuntu-24.04` 镜像 `20260920.314.1`，Docker 28.0.4，Compose 2.38.2（docker-smoke run 1 的日志）。
+
+### Phase 15 前置修复（2026-09-25）：`awm verify`、训练环境与上游错误
+
+- **`awm verify` 的两种模式**（AWM @ `85e322f`，`awm/core/verify.py`）：
+  - `Config` 的字段在 `:37-49`：`input`、`init_db_path`、`final_db_path`、`mode`（默认 `sql`）、`verifier_path`、`verifier_code_path`；
+  - `pre_process` 只在 sql 模式下检查 LLM 相关的环境变量（`:51-80`）；
+  - 只有 sql 模式会调用裁判（`:416-433`）。裁判的地址、key 与模型由 `resolve_llm_config` 从环境读取（`awm/tools.py:386-437`），请求设置 `temperature=1.0`、`max_completion_tokens=4096`（`:302-310`）；
+  - code 模式执行 verifier，结果只取 `complete` 或 `others`（`:151-198`）；
+  - 默认的 verifier 路径是 `./outputs/gen_verifier.pure_code.jsonl` 与 `./outputs/gen_verifier.jsonl`（`:376-379`）。官方数据集 revision `dde80a0` 同时提供这两个文件（`data/awm1k/`，大小分别约 45 MB 与 248 MB）；
+  - `awm verify` 读取输出目录中的 `trajectory.json` 与两个数据库（`:350-373`），结果写到 `verify.<mode>.json`（`:436`）。
+- **上游错误的重试层次**（ADR-024）：
+  - openai SDK 2.38.0：异步客户端把 402 映射为 `APIStatusError`（`openai/_client.py:1081-1112`）；`_should_retry` 只重试 408、409、429、5xx 与带 `x-should-retry` 头的响应（`openai/_base_client.py:795-826`）；默认重试 2 次（`openai/_constants.py:10`）；
+  - AWM `GPTClient`：共尝试 3 次，最后返回空的 refusal completion（`awm/gpt.py:168-206`）。

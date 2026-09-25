@@ -81,11 +81,11 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
   - 测试会启动真实子进程，并读取真实 AWM 进程组的 `/proc/<pid>/environ`，断言其中没有 `DEEPSEEK_API_KEY` 和任何 `*_API_KEY`（`docs/verification/logs/2026-09-24-phase12.5-subprocess-env.log`）。
 
   仍然存在的限制：
-  - **`awm verify` 无法隔离**。它在同一进程里做两件事：
-    - 执行 verifier 代码，namespace 中直接提供了 `os`（`awm/core/verify.py:104-126`、`:151-174`）；
-    - 从环境读取 key 调用裁判（`:230-302`、`:419-421`）。
-
-    不改上游就无法把两者分开。`--mode code` 不调用 LLM，可以在不含任何 key 的环境里运行；`--mode sql` 必须带 key。另一种做法是让它只拿到占位 key，见 IDEAS 12，未实现。
+  - **`awm verify` 要经 `workbench verify` 运行**（Phase 15 起，ADR-025）：
+    - `awm verify` 在同一进程里执行 verifier 代码（namespace 中直接提供了 `os`，`awm/core/verify.py:104-126`、`:151-174`），sql 模式下还从同一进程的环境读取裁判的 key（`:416-433`）；
+    - `workbench verify` 让 code 模式的进程拿不到任何 key，sql 模式的进程只拿到代理地址与占位 key；
+    - 直接运行 `awm verify` 时，shell 里的 key 仍会交给 verifier 代码；
+    - sql 模式下，verifier 代码仍能经代理发起 LLM 调用。调用记入 `verify_ledger.jsonl`，但没有预算上限。
   - **`gen env`、`gen verifier` 的生成代码**与调用 LLM 的步骤在同一进程树里。
     - 经代理时，生成代码只能看到占位 key 和代理地址。它仍能经代理发起 LLM 调用，费用记入账本。
     - 不经代理时（只有在 Python 中直接调用才会出现），会看到真实的 `OPENAI_API_KEY`。
