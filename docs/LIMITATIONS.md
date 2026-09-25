@@ -5,7 +5,7 @@
 - §1 是验证状态，分两节：1.1 为仍未验证的项目（UNVERIFIED-LOCAL），写明原因与验证所需的资源和步骤；1.2 为已在真实环境中验证过的项目，附日期、机器类型与日志路径。
 - §2–§6 是已知限制，与是否验证无关。
 
-开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9）。本文件的状态截至 2026-09-25：TASK_v2（Phase 9–15）收尾，以及 polish-v3 的 Phase 16–17（审批前预演的限制见 §6）。
+开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9）。本文件的状态截至 2026-09-25：TASK_v2（Phase 9–15）收尾，以及 polish-v3 的 Phase 16–18（审批前预演与审批策略的限制见 §6）。
 
 ## 1. 验证状态
 
@@ -161,4 +161,14 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
     - 进程重启且没有固定 `WORKBENCH_APPROVAL_SECRET` 时，挂起中、要求预演的审批只能拒绝后重新发起。
   - 独立运行的 `workbench gateway serve` 只有在配置了 `env.manager_url` 时才能预演；否则按默认的 `require_preview`，destructive 调用在那里无法批准。
   - 审批卡片每类最多显示 `approval.preview_max_rows` 行（默认 20），比对使用全部的键。
-
+- **审批策略（Phase 18，ADR-030）只看调用本身**：
+  - 规则只匹配工具名、场景、风险级别与参数，不看数据库状态（例如购物车总额）。"按预演影响范围自动放行"记在 IDEAS 第 14 条，未实现。
+  - 参数条件从严：
+    - 缺少参数时不命中；
+    - 参数存在但无法比较时，deny 与 require_human 命中，auto_approve 不命中；
+    - 字符串形式的数字不转换。
+    - 规则里的参数名写错时不会报错，只是永远不命中；上线前可以用 `workbench gateway policy test` 试。
+  - auto_approve 的 write 调用执行前没有预演，只在执行后测量实际改动并写入审计（D32）。外部 MCP 客户端经网关调用时同样如此。
+  - 策略文件只在网关启动时加载，修改后要重启。
+  - `tool_policy.yaml` 的 `require_approval` 不再能免除 write 与 destructive 的审批（Phase 18 之前可以）；要免除，只能写 auto_approve 规则。
+  - `workbench gateway policy test` 离线分级只看工具名与路由的 HTTP 方法，在线会话还看工具描述，结果可能不同；可以用 `--risk` 指定。
