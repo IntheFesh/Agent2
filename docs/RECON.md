@@ -624,3 +624,46 @@ HF 数据集卡本身未能访问（见 §9）。以下字段来自**写入这�
     - 出现最多的是 `VERL_LOGGING_LEVEL`（81 处）；
     - 其余包括 `RANK`、`LOCAL_RANK`、`WORLD_SIZE`、`MASTER_ADDR`、`MASTER_PORT`、`NCCL_*`、`CUDA_*`、`TORCH_*`、`CUBLAS_WORKSPACE_CONFIG`、`FLASH_ATTENTION_DETERMINISTIC`，以及跟踪器相关的 `WANDB_ENTITY`、`MLFLOW_*`、`SWANLAB_API_KEY`、`VOLC_ACCESS_KEY_ID`、`VOLC_SECRET_ACCESS_KEY`。
   - smoke profile 的 `trainer.logger` 为 `['console']`（`configs/train/smoke.yaml`），不需要任何跟踪器的 key。
+
+### Phase 15 runbook（2026-09-25）：GPU 步骤用到的事实
+
+`docs/runbooks/phase15-gpu.md` 中的命令、参数与预期输出依据下面的源码与实验（均在无 GPU 的容器中完成）。
+
+- **uv 0.8.17**：
+  - **镜像与锁文件**：在只锁定 `six==1.16.0` 的最小项目中设置 `UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple`。`uv sync --frozen` 仍从锁文件记录的 `files.pythonhosted.org` 下载；`uv sync --locked` 改从镜像解析，然后报 `The lockfile at uv.lock needs to be updated, but --locked was provided`（锁文件记录的 registry 是 `https://pypi.org/simple`）。所以 runbook 不设镜像，下载慢时用代理。
+  - **`extra-build-dependencies`**：最小项目锁定 `six==1.16.0`，一个本地源码包（setuptools，构建时把 `six.__version__` 写进文件）的额外构建依赖写成 `"six"` 时，构建环境里是 six 1.17.0；写成 `{ requirement = "six", match-runtime = true }` 时是 1.16.0。命令为 `uv lock` 后 `uv sync --frozen`（ADR-027）。
+  - **PyPI 上的 torch**：2026-09-25 查询 `https://pypi.org/pypi/torch/json`，最新版本为 2.14.0，`requires_dist` 含 `cuda-toolkit[…]==13.0.3`；`train/uv.lock` 锁定 torch 2.10.0。改为 `match-runtime` 后，`cd train && uv lock --check` 退出码为 0，`train/uv.lock` 的 md5 修改前后相同。
+  - `uv run` 的 `--no-sync` 对应环境变量 `UV_NO_SYNC`（`uv run --help`）。
+- **flash-attn 2.8.3.post1**（PyPI 源码包，只读解压到 scratch，`setup.py`）：
+  - 顶层 import torch（`:22-23`），并按构建环境中 torch 的版本拼出 GitHub 预编译 wheel 的地址（`:440-472`）；
+  - `FLASH_ATTENTION_FORCE_BUILD=TRUE` 跳过下载直接编译（`:61`，`:484-486`）；
+  - `FLASH_ATTN_CUDA_ARCHS` 默认 `80;90;100;120`（`:70`），`NVCC_THREADS` 默认 4（`:124`）；
+  - 要求 `CUDA_HOME` 与 nvcc ≥ 11.7（`:168-175`）；
+  - 未设 `MAX_JOBS` 时按 `min(CPU 核数/2, psutil 可用内存 GB/9)` 计算（`:513-526`，注释称每个任务峰值约 8–9 GB）；
+  - `setup_requires` 为 packaging、psutil、ninja（`:568-572`）。
+- **vLLM v0.19.0**（commit `2a69949`，稀疏检出到 scratch）：
+  - 在 CUDA 上使用自带的 `vllm.vllm_flash_attn`，外部 `flash_attn` 包只在 ROCm 上使用（`vllm/v1/attention/backends/fa_utils.py:18-44`）；另有一处按 `find_spec` 可选导入（`vllm/model_executor/layers/rotary_embedding/common.py:136-140`）。所以 15A 可以不装 flash-attn。
+  - 使用统计默认开启，`VLLM_NO_USAGE_STATS=1`、`VLLM_DO_NOT_TRACK=1` 或 `DO_NOT_TRACK=1` 可以关闭（`vllm/usage/usage_lib.py:52-66`，`vllm/envs.py:663-666`）。
+  - 启动日志：`"auto" tool choice has been enabled.`（`vllm/parser/parser_manager.py:202`，由 `OpenAIServingChat.__init__` 在启动时调用，`vllm/entrypoints/openai/chat_completion/serving.py:132`）；`GPU KV cache size: … tokens` 与 `Maximum concurrency for … tokens per request`（`vllm/v1/core/kv_cache_utils.py:1319-1329`，数字带千位分隔符）。
+  - `ChatCompletionRequest` 接受 `max_completion_tokens`（`vllm/entrypoints/openai/chat_completion/protocol.py:164`）、`min_tokens`（`:199`）、`add_generation_prompt`（`:216`）与 `chat_template_kwargs`（`:263`）；`--api-key` 默认为空，即不校验（`vllm/entrypoints/openai/cli_args.py:242`）。
+  - 没有 `--enable-auto-tool-choice` 时，带 `tools` 的请求返回 `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`（`vllm/entrypoints/serve/render/serving.py:205-215`）。
+- **AWM `awm agent`**（`awm/core/agent.py` @ `85e322f`）：
+  - `Config` 的默认值 `max_iterations` 30、`temperature` 1.0、`max_tokens` 2048（`:49-68`）；
+  - system prompt（`:88-127`）、文本解析器（`:130-167`）、`generate_response`（`:339-386`，请求参数 `:367-379`）；
+  - 地址含 `localhost` 与 `v1` 时附加 vLLM 参数（`:417`），并以 `tool` 角色回传工具结果（`:355-361`）；key 取 `OPENAI_API_KEY`，没有时为 `EMPTY`（`awm/tools.py:429`）；
+  - 客户端为默认设置的 `AsyncOpenAI`（`:472-475`）；
+  - 轨迹条目的字段见 `:511-517`（最终回答）与 `:560-569`（工具调用），结束时打印 `Run outputs saved to: …`（`:601`）。
+  - `workbench serve probe` 的 text 探针在运行时调用这些函数，没有把 AWM 的 prompt 复制进本仓库（ADR-003）。
+- **huggingface_hub 1.32.0**（应用环境）：
+  - 装有 `hf_xet`；`HF_HUB_DISABLE_XET=1` 关闭 Xet 协议（`huggingface_hub/constants.py:342`，`utils/_runtime.py:155-157`）；
+  - 下载时只有 revision 不是提交哈希才写 `refs/<revision>`（`file_download.py:723-728`），离线加载按 `refs/main` 查找（`:1584-1590`），所以 runbook 下载 Qwen3-0.6B 时不指定哈希。
+- **veRL fork @`001f000`**：
+  - 版本文件为 `0.8.0.dev`；
+  - console logger 每个 step 打印一行 `step:N - key:value - …`（`verl/utils/logger/aggregate_logger.py:26-31,49-51`），由 `ray_trainer.py:1784` 在每个训练 step 调用；
+  - 该提交（"remove printing in ray trainer"）只删除了 `ray_trainer.py` 中的 8 行打印。
+- **veRL 嵌套子模块的 HTTPS 克隆**：对 AgentFly @`1256586` 的本地克隆（`.gitmodules` 中 `submodule.verl.url` 为 `git@github.com:Agent-One-Lab/verl.git`）原样执行 `git -C <克隆> -c url."https://github.com/".insteadOf="git@github.com:" submodule update --init verl`：输出 `Submodule path 'verl': checked out '001f000ae2e4cf05bb94c01427898cbe68961141'`，耗时约 3 秒；随后 `submodule status verl` 行首为空格，`verl/verl/version/version` 为 `0.8.0.dev`，`git status --porcelain` 与 `git diff .gitmodules` 都没有输出。`-c` 设置经 `GIT_CONFIG_PARAMETERS` 传给 `git submodule` 启动的克隆进程，所以不需要修改 `.gitmodules`。 <!-- pragma: allowlist secret (a git commit SHA quoted from git's output) -->
+- **AgentFly @`1256586`**：`.gitignore` 包含 `build/`、`dist/`、`*.egg-info/`、`__pycache__/`（第 13、25、27、37 行），editable 安装不会让子模块出现未跟踪文件。
+- **模型与数据**：
+  - Hugging Face API（2026-09-25）：`Snowflake/Arctic-AWM-4B` @`437dfa0` 的权重是两个 safetensors 分片，约 5.0 GB 与 3.8 GB；`Qwen/Qwen3-0.6B` 的 `main` 为 `c1899de289a04d12100db370d81485cdf75e47ca`。
+  - 官方数据集中 `e_commerce_33` 任务 0 的纯代码 verifier：174 行，只 import `re` 与 `sqlite3`，以 `mode=ro` 打开数据库，没有写 SQL，也没有文件、网络或子进程调用。
+  - 数据集 `gen_sample.jsonl` 中电话号码的写法：`555-111-2222`、`+1-312-555-0100`、`+12125550123`（`scripts/redact_paste.py` 按这些写法识别电话）。

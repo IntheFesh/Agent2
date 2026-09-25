@@ -32,7 +32,7 @@
 
 冲突处理：任务书与上游不一致时以上游源码为准，停下报告。停止条件见 TASK.md §7。
 
-当前状态（Phase 0–8 全部完成，TASK_v2 的 Phase 9–14 与修复阶段 Phase 12.5 已完成；入口见 `README.md`，未验证项见 `docs/LIMITATIONS.md`）：
+当前状态（Phase 0–8 全部完成，TASK_v2 的 Phase 9–14 与修复阶段 Phase 12.5 已完成；Phase 15 的前置修复已完成，GPU 步骤等仓库主人执行；入口见 `README.md`，未验证项见 `docs/LIMITATIONS.md`）：
 - 上游固定在 AWM `85e322f`、AgentFly `1256586`。嵌套的 `verl` 默认不初始化；`mcp-adapted-bench` 永不使用；`patches/` 为空。
 - 训练配方结论为 (b)：只有环境适配，没有完整官方配方，因此不创建 `paper_mirror` profile；smoke 只用 AgentFly 自带工具与奖励（ADR-012）。
 - AWM 仓库没有许可证：按 ADR-003 只引用、不复制、不打补丁（2026-09-24 复查仍无）。数据集 CC-BY-4.0（须署名），模型 Apache-2.0。
@@ -48,6 +48,9 @@
 - Phase 14：Docker 由 GitHub Actions 的 `docker-smoke` 任务验证（U6 已验证，`scripts/docker_smoke.py`；只允许为让构建通过而改 Dockerfile/compose 并补 ADR）。合成 runner：
   - 每个步骤在独立进程组中运行，中断时回收步骤及其全部后代所在的进程组，退出码 130；未完成的步骤重做前，输出移到 `attempts/`（ADR-022）；
   - 本地代理按账本做预算熔断，上限为 `synth.budget`，默认 ¥5，无价格的模型 fail closed（ADR-023）；
-  - 步骤成功与否只看退出码与输出文件，上游持续出错时仍可能记为完成（LIMITATIONS §6）；
+  - 步骤成功与否原本只看退出码与输出文件；Phase 15 起还看账本中的上游错误（ADR-024，见下）；
   - 测试中断 runner 时，要让被中断的请求在上游保持足够长的时间，不要依赖时间窗口（ci run 27 的教训）。
+- Phase 15（runbook 模式，D18、D21）：前置修复已完成——合成步骤按账本中的上游错误判定（`synth.max_failed_requests`，默认 0，`done_with_failures`，ADR-024）；`awm verify` 一律经 `workbench verify` 运行（code 模式不需要裁判，ADR-025）；训练进程只拿白名单环境变量（`train.env_passthrough`，ADR-026）；flash-attn 的构建环境使用锁定的 torch（`match-runtime`，ADR-027）。
+  - runbook 为 `docs/runbooks/phase15-gpu.md`：仓库主人在自己的 GPU 机器上执行，回贴经 `scripts/redact_paste.py` 脱敏的日志后，再更新 U1、U3、U4、U5、U8 与 LIMITATIONS。在此之前不要把这些项写成已验证。
+  - `workbench serve probe` 向 vLLM 各发 1 个原生 tools 请求和 1 个 `awm agent` 文本协议请求（U1）。
 - 改动 README 或 docs 后运行 `make check-numbers`；改动 registry 后运行 `make results`。
