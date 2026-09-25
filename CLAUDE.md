@@ -1,4 +1,4 @@
-# CLAUDE.md — BizAgent Workbench 工作守则（R1–R14 要点；完整版见 TASK.md）
+# CLAUDE.md — BizAgent Workbench 工作守则（R1–R14 要点；完整版见 docs/process/TASK.md）
 
 边界：只改"怎么用、怎么部署、怎么管、怎么看"，不改"模型有多强"；本仓库不产生任何模型性能数字。
 
@@ -26,17 +26,17 @@
   - 每个提交在 mock 模式下都能通过 `make test`；不 force push，不改写历史，不改 git 作者配置。
 - **R10 无 GPU**：自有代码在 CPU + mock LLM 下跑通测试；GPU 相关部分只写脚本和文档。
 - **R11 依赖隔离**：app（根目录）与 train（`train/`）是两个独立的 uv 环境；不为共存而升级或降级上游固定版本；app 代码不得 import torch 分布式、veRL、AgentFly 训练模块。
-- **R12 阶段闸门**：每个 Phase 结束时按 TASK.md §5 输出报告，然后停下，等"继续"。
+- **R12 阶段闸门**：每个 Phase 结束时按 docs/process/TASK.md §5 输出报告，然后停下，等"继续"。
 - **R13 范围**：不加任务书以外的大功能，新想法写进 `docs/IDEAS.md`。
 - **R14 语言**：文档用中文（README 开头附 5 行英文摘要）；代码标识符和注释用英文；提交信息用英文。
 
-冲突处理：任务书与上游不一致时以上游源码为准，停下报告。停止条件见 TASK.md §7。
+冲突处理：任务书与上游不一致时以上游源码为准，停下报告。停止条件见 docs/process/TASK.md §7。
 
-当前状态（Phase 0–8 全部完成；TASK_v2 本轮 Phase 9–15 与修复阶段 Phase 12.5 已于 2026-09-25 收尾，其中 Phase 15 只完成了前置修复与 runbook，GPU 步骤按 D22 未执行；入口见 `README.md`，未验证项见 `docs/LIMITATIONS.md` §1.1）：
+当前状态（Phase 0–8 全部完成；TASK_v2 的 Phase 9–15 与修复阶段 Phase 12.5 已于 2026-09-25 收尾并经 PR #1 合入 `main`，其中 Phase 15 只完成了前置修复与 runbook，GPU 步骤按 D22 未执行；入口见 `README.md`，未验证项见 `docs/LIMITATIONS.md` §1.1）：
 - 上游固定在 AWM `85e322f`、AgentFly `1256586`。嵌套的 `verl` 默认不初始化；`mcp-adapted-bench` 永不使用；`patches/` 为空。
 - 训练配方结论为 (b)：只有环境适配，没有完整官方配方，因此不创建 `paper_mirror` profile；smoke 只用 AgentFly 自带工具与奖励（ADR-012）。
 - AWM 仓库没有许可证：按 ADR-003 只引用、不复制、不打补丁（2026-09-24 复查仍无）。数据集 CC-BY-4.0（须署名），模型 Apache-2.0。
-- registry 30 条已对照 arXiv v3 Table 4 核对（`verified: true`，证据在 `docs/verification/`）；模型身份仍为推定。Phase 9–15 按 `TASK_v2.md` 在 `phase9-verification` 分支进行。
+- registry 30 条已对照 arXiv v3 Table 4 核对（`verified: true`，证据在 `docs/verification/`）；模型身份仍为推定。Phase 9–15 按 `docs/process/TASK_v2.md` 在 `phase9-verification` 分支进行。
 - 官方数据集用 `make data` 下载到 `data/awm1k`（revision `dde80a0`，不入库）；依赖它的测试标 `official_data`，无数据时自动 skip。迷你夹具的接口已与官方 `e_commerce_33` 对账。
 - 调用 AWM 时必须显式传 `--temp_server_path`、`--db_path`、`--output_dir`；合成前先复制种子文件。否则会写入官方数据目录或 submodule。
 - AWM server 以进程组启动，必须用 `killpg` 回收；所有命令设置 `PYTHONPYCACHEPREFIX`，避免在 submodule 中留下 `__pycache__`。
@@ -52,7 +52,10 @@
   - 测试中断 runner 时，要让被中断的请求在上游保持足够长的时间，不要依赖时间窗口（ci run 27 的教训）。
 - Phase 15（runbook 模式，D18、D21）：前置修复已完成——合成步骤按账本中的上游错误判定（`synth.max_failed_requests`，默认 0，`done_with_failures`，ADR-024）；`awm verify` 一律经 `workbench verify` 运行（code 模式不需要裁判，ADR-025）；训练进程只拿白名单环境变量（`train.env_passthrough`，ADR-026）；flash-attn 的构建环境使用锁定的 torch（`match-runtime`，ADR-027）。
   - runbook 为 `docs/runbooks/phase15-gpu.md`：仓库主人在自己的 GPU 机器上执行，回贴经 `scripts/redact_paste.py` 脱敏的日志后，再更新 U1、U3、U4、U5、U8 与 LIMITATIONS。在此之前不要把这些项写成已验证。
-  - 本轮按 D22 没有执行；以后仓库主人在新分支上单独执行 Phase 15，回贴日志后另提一个小 PR。
-- 本轮收尾（TASK_v2 §4，2026-09-25）：LIMITATIONS §1 分为 1.1 未验证与 1.2 已验证（附日期、机器类型、日志路径）；README、CHANGELOG 与费用账本已同步；按 N5 从 `phase9-verification` 向 `main` 开 PR。
+  - TASK_v2 按 D22 没有执行；以后仓库主人在新分支上单独执行 Phase 15，回贴日志后另提一个小 PR。
+- TASK_v2 收尾（§4，2026-09-25）：LIMITATIONS §1 分为 1.1 未验证与 1.2 已验证（附日期、机器类型、日志路径）；README、CHANGELOG 与费用账本已同步；按 N5 从 `phase9-verification` 向 `main` 开 PR（PR #1，已合并）。
   - `workbench serve probe` 向 vLLM 各发 1 个原生 tools 请求和 1 个 `awm agent` 文本协议请求（U1）。
-- 改动 README 或 docs 后运行 `make check-numbers`；改动 registry 后运行 `make results`。
+- polish-v3 本轮（Phase 16–18，分支 `polish-v3`，D23–D25）：不调用任何付费 API，LLM 只用 mock，不做评测；Phase 18 之后按 `docs/process/TASK.md` §6 验收，再向 `main` 开 PR（已授权）。
+  - Phase 16：自有代码按 MIT 授权，只覆盖本仓库文件（`third_party/`、数据集、模型各按各自条款）；任务书原文在 `docs/process/`，数字守卫经 `configs/number_whitelist.yaml` 的 `skip_files` 只豁免这两份（ADR-028）；
+  - README 首屏的两张截图由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成，UI 改动后重新生成；docker-smoke 也在 `polish-v3` 上运行。
+- 改动 README 或 docs 后运行 `make check-numbers` 与 `make check-links`（`make lint` 已包含后者）；改动 registry 后运行 `make results`。
