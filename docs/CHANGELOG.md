@@ -15,7 +15,7 @@
 
 按阶段划分的变更记录见 `git log --oneline`（Conventional Commits）。
 
-### 本轮：TASK_v2 Phase 9–15（2026-09-24 至 2026-09-25，分支 `phase9-verification`）
+### TASK_v2：Phase 9–15（2026-09-24 至 2026-09-25，分支 `phase9-verification`，PR #1）
 
 本轮的目标是在真实环境中逐项验证 LIMITATIONS 中的未验证项，并补齐外部事实的核对。按仓库主人的决定，Phase 12.5 与 Phase 15 的前置修复包含一些缺陷修复与隔离加固，每项都有 ADR 与单测。Phase 15 的 GPU 步骤本轮没有执行（D22）。
 
@@ -32,3 +32,13 @@
 | 收尾 | LIMITATIONS 分为"未验证"与"已验证"两节；README、CHANGELOG 与费用账本同步；按 `docs/process/TASK.md` §6 执行最终验收清单（`docs/verification/logs/2026-09-25-final-checklist.log`） | `1671021`、`6663871` 与记录验收清单的提交 |
 
 费用：本轮外部 API 调用累计 ¥3.1396（上界口径，明细见 `docs/verification/cost-ledger.md`），低于 N3 的 ¥30 上限；Phase 13 之后没有再调用任何付费 API。
+
+### polish-v3：Phase 16–18（2026-09-25 起，分支 `polish-v3`）
+
+本轮只改仓库门面与审批流程。按仓库主人的要求（D24），不调用任何付费 API，LLM 只用 mock，不做任何评测。
+
+| 阶段 | 变更 | 主要提交 |
+|---|---|---|
+| Phase 16 | 自有代码按 MIT 授权（`LICENSE`、pyproject 的 `license`、README"许可证"一节）；`scripts/demo_ui_check.py` 生成 README 的两张 mock 演示截图；README 首屏加 CI 徽章、"本仓库做了什么 / 上游提供了什么"与真实仓库地址；任务书移至 `docs/process/`，数字守卫按文件豁免（ADR-028）；新增相对链接检查（`make lint` 与 CI）；docker-smoke 也在 `polish-v3` 上运行 | `ff0d19e`、`782581a`、`dcfaf7b`、`3516b65`、`552cb5a`、`47b9b8e` |
+
+费用：¥0（没有调用任何外部付费 API）。
