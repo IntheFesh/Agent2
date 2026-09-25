@@ -30,7 +30,7 @@ U1、U3、U4、U5、U8 都需要 GPU 机器，原因相同：**Phase 15 runbook 
   - 日期：2026-09-24 起；机器：GitHub 托管 runner（`ubuntu-latest`）；证据：`docs/verification/2026-09-24-preflight.md` §2。本轮最后一次提交的运行结果见 `phase9-verification` → `main` 的 PR。
 - **Docker 镜像构建与 compose 启动（原 U6）**：
   - 本机 `dockerd` 能启动，但 Docker Hub 返回 429，按 D15 改在 GitHub Actions 托管 runner 上验证。
-  - `.github/workflows/docker-smoke.yml` 在 push 到 `phase9-verification` 与 `main` 时运行 `scripts/docker_smoke.py`：构建，启动（不带 `gpu` profile），经 HTTP API 走完"查询 → 写操作 → 审批 → 完成"，最后停止。2026-09-24 的两次运行都通过（run 1 提交 `5419a2c`，run 2 提交 `c2a8a08`）。
+  - `.github/workflows/docker-smoke.yml` 运行 `scripts/docker_smoke.py`（当时在 push 到 `phase9-verification` 与 `main` 时触发；2026-09-25 起改为 push 到 `main` 与以 `main` 为目标的 PR，D27）：构建，启动（不带 `gpu` profile），经 HTTP API 走完"查询 → 写操作 → 审批 → 完成"，最后停止。2026-09-24 的两次运行都通过（run 1 提交 `5419a2c`，run 2 提交 `c2a8a08`）。
   - 只有一个约 880 MB 的镜像，`app` 与 `env-manager` 共用；构建分别用了 15.9 s 与 23.0 s，冷启动 13.4 s 与 15.0 s。这些是单次测量，随 runner 变化。
   - `gpu` profile 仍未验证（U1）。
   - 日期：2026-09-24；机器：GitHub 托管 runner（`ubuntu-24.04`）；证据：`docs/verification/2026-09-24-docker-smoke.md`，日志 `docs/verification/logs/2026-09-24-phase14-docker-smoke.log`。
