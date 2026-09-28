@@ -5,7 +5,8 @@
 - 第一部分是本轮的任务书；
 - 第二部分是 Phase 16 确认时的补充要求；
 - 第三部分是 Phase 17 确认时的补充要求（Phase 18 开始时存档）；
-- 据此作出的决定记在 `docs/verification/user-decisions.md` §9、§10、§11。
+- 第四部分是 Phase 18 确认时的补充要求（本轮收尾时存档）；
+- 据此作出的决定记在 `docs/verification/user-decisions.md` §9、§10、§11、§12。
 
 ## 一、本轮任务（2026-09-25）
 
@@ -111,4 +112,25 @@ Phase 17 确认。两个问题：
 另外：取消 PR 的定时复查。只在我发消息或 CI 结果与预期不符时处理 PR，不必每小时汇报。
 
 继续 Phase 18。
+```
+
+## 四、Phase 18 确认时的补充（2026-09-28）
+
+```text
+Phase 18 确认。两个问题：
+
+1. 默认策略不启用 auto_approve：
+   - configs/approval_policy.yaml 中的 small-cart-add-official 改为注释掉的示例，并注明"自动放行需由管理员显式开启"；
+   - 新增 configs/approval_policy.demo.yaml（三种决策各一例，含这条 auto_approve 规则），
+     make demo-mock、docker-smoke 和相关测试改用它；
+   - 在 ADR-030 中写明理由：默认配置应当最保守；并且 LIMITATIONS 已记录官方环境"加购不存在的 offer 也会写入成功"，
+     默认自动放行会让这类错误写入无人把关；
+   - 同步更新 README、WALKTHROUGH 中关于默认策略的描述，以及 policy test 的示例。
+2. 分支：我已在仓库设置中开启 "Automatically delete head branches"，并手动删除了 phase9-verification
+   和 claude/kind-gauss-3clgyp。合并 PR #4 后不必再尝试删除 polish-v3，确认它已被自动删除即可；没有删除的话告诉我。
+
+你列出的三处偏差（只读调用不预演；tool_policy.yaml 的 require_approval 不再免除审批；参数条件从严）都同意，
+确认它们已写进 ADR-030。
+
+然后按 TASK.md §6 执行最终验收；通过后把 PR #4 标为 ready，并以 merge commit 合并。本轮到此结束。
 ```

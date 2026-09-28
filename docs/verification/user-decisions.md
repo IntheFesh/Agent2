@@ -95,3 +95,12 @@ N5 核对（2026-09-24）：§2 中"本轮结束后从 `phase9-verification` 向
 | D31 | 远端分支清理（修订 D26 的条件） | `main` 前进后，"字面 diff 为空"不再适用，改为按包含关系判断：`phase9-verification` 是 `main` 的祖先；`claude/kind-gauss-3clgyp` 相对合并基的改动为空，只多出 PR #2 的空合并提交 `71a7185`。删除前再核对一次，通过后删除；没有权限就停下报告。<br>执行结果（2026-09-25）：<br>- 核对通过：默认分支是 `main`；`git merge-base --is-ancestor origin/phase9-verification origin/main` 返回 0；`claude/kind-gauss-3clgyp` 与 `main` 的合并基是 `bb8f504`，`git diff origin/main...origin/claude/kind-gauss-3clgyp` 为空，`git log origin/main..origin/claude/kind-gauss-3clgyp` 只有 `71a7185`；<br>- `git push origin --delete phase9-verification` 被拒绝（HTTP 403，本会话没有删除远端分支的权限），按指示停止，`claude/kind-gauss-3clgyp` 没有再尝试；<br>- **两个分支都没有删除**，留给仓库主人在 GitHub 上删除。删除前的分支头：`phase9-verification` = `bb8f504`，`claude/kind-gauss-3clgyp` = `71a7185`。 |
 | D32 | auto_approve 的 write 调用 | - 不跑预演；<br>- 令牌绑定 `preview_unavailable`，批准人记为 `policy:<规则编号>`；<br>- 执行后照常测量实际改动，与规则编号一起写入审计；<br>- require_human 的调用照常预演；<br>- "按预演影响范围决定是否自动放行（例如只改动指定表且不超过 N 行）"写进 `docs/IDEAS.md`，本轮不实现。 |
 | D33 | PR 的定时复查 | 取消每小时的定时复查。只在仓库主人发消息，或 CI 结果与预期不符时处理 PR，不必每小时汇报。 |
+
+## 12. Phase 18 确认之后（2026-09-28）
+
+| # | 主题 | 决定 |
+|---|---|---|
+| D34 | 默认审批策略不启用 auto_approve | - `configs/approval_policy.yaml` 中的 `small-cart-add-official` 改为注释掉的示例，注明"自动放行需由管理员显式开启"；<br>- 新增 `configs/approval_policy.demo.yaml`（三种决策各一例，含这条 auto_approve 规则），`make demo-mock`、docker-smoke 与相关测试改用它；<br>- 在 ADR-030 中写明理由：默认配置应当最保守；LIMITATIONS §6 已记录官方环境"加购不存在的 offer 也会写入成功"，默认自动放行会让这类错误写入无人把关；<br>- 同步 README、WALKTHROUGH 中关于默认策略的描述，以及 `policy test` 的示例。 |
+| D35 | 远端分支（接 D31） | 仓库主人已在仓库设置中开启 "Automatically delete head branches"，并表示已手动删除 `phase9-verification` 与 `claude/kind-gauss-3clgyp`。合并 PR #4 后不再尝试删除 `polish-v3`，只确认它已被自动删除；没有删除就告诉仓库主人。<br>合并前的核对（2026-09-28）：<br>- GitHub API（`list_branches`）与 `git ls-remote --heads origin` 仍列出这两个分支，分支头仍是 `bb8f504`、`71a7185`；<br>- 本会话没有再尝试删除（D31 已知没有删除权限），在本轮的最终报告中告知仓库主人；<br>- `polish-v3` 是否被自动删除，在合并后核对，结果写在最终报告中（合并之后不再向仓库提交）。 |
+| D36 | Phase 18 的三处偏差 | 同意：<br>- 被规则要求人工审批的只读调用不预演；<br>- `tool_policy.yaml` 的 `require_approval` 不再能免除 write 与 destructive 的审批；<br>- 参数条件从严（缺少参数不命中；无法比较时只往更严的方向判）。<br>三处都写在 ADR-030 的"决定"中，并注明已经仓库主人同意（D36）。 |
+| D37 | 本轮收尾 | 按 `docs/process/TASK.md` §6 执行最终验收；通过后把 PR #4 标为 ready，并以 merge commit 合并。本轮到此结束。 |
