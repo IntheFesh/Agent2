@@ -1,0 +1,183 @@
+# 2026-09-28 TASK.md §6 final acceptance checklist, run at the polish-v3 wrap-up (owner decision D37)
+# machine: Claude Code cloud container (Linux x86_64, no GPU); commit checked: 76541a808c56da61fdbf85bc307ffb717df7224a
+# every command ran with PYTHONPYCACHEPREFIX=$PWD/.cache/pycache and without DEEPSEEK_API_KEY in its environment
+# CI (item 5, second half) runs on the pushed head; its result is recorded on PR #4 (polish-v3 -> main)
+
+## 1. make setup && make doctor && make lint && make test && make check-numbers && make demo-mock
+### make setup
+git submodule update --init third_party/agent-world-model third_party/AgentFly
+uv sync --frozen
+Audited 140 packages in 1ms
+uv run python tests/fixtures/awm_mini/build_fixture.py
+cd train && uv lock --check
+Using CPython 3.12.3 interpreter at: /usr/bin/python3.12
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Resolved 244 packages in 3ms
+real 0.177s
+make setup rc=0
+
+### make doctor
+uv run workbench doctor
+                                workbench doctor                                
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ check                       ┃ status ┃ detail                                ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ python                      │ ok     │ 3.12 (AWM and AgentFly require 3.12)  │
+│ submodule:agent-world-model │ ok     │ pinned at 85e322f69279                │
+│ submodule:AgentFly          │ ok     │ pinned at 1256586b1109                │
+│ dataset                     │ ok     │ data/awm1k present                    │
+│ ports                       │ ok     │ env pool 18100-18199: 0 busy          │
+│ gpu                         │ warn   │ no nvidia-smi: GPU steps are          │
+│                             │        │ UNVERIFIED-LOCAL (mock mode still     │
+│                             │        │ works)                                │
+│ env-vars                    │ ok     │ backend=mock_replay                   │
+│ llm                         │ ok     │ mock_replay fixture                   │
+│                             │        │ tests/fixtures/trajectories/e_commer… │
+└─────────────────────────────┴────────┴───────────────────────────────────────┘
+real 0.413s
+make doctor rc=0
+
+### make lint (tail)
+uv run python scripts/check_links.py
+checked 37 relative links in 30 files; 0 broken
+uv run ruff check src tests
+All checks passed!
+uv run ruff format --check src tests
+125 files already formatted
+uv run mypy --strict src
+Success: no issues found in 75 source files
+real 0.726s
+make lint (tail) rc=0
+
+### make test (tail)
+382 passed, 224 warnings in 209.65s (0:03:29)
+real 211.573s
+make test (tail) rc=0
+
+### make check-numbers
+uv run workbench results check
+registry: 30 entries (0 unverified); scanned 27 files (3 exempt as skip_files); 
+0 finding(s)
+real 0.375s
+make check-numbers rc=0
+
+### make demo-mock (a server: started in its own process group, driven in a browser and over the API, then stopped with SIGTERM)
+$ setsid nohup make demo-mock &   # then GET /healthz
+healthz: {"ok":true,"sessions":0,"llm_backend":"mock_replay","approval_policy":{"file":"configs/approval_policy.demo.yaml","rules":["no-payment-method-deletion (deny)","bulk-cart-add-needs-human (require_human)","small-cart-add-official (auto_approve)"]}}
+server log (head):
+uv run workbench api serve --demo
+demo mode: open http://127.0.0.1:8080/ui/ and pick scenario mini_e_commerce 
+(approval policy: configs/approval_policy.demo.yaml)
+INFO:     Started server process [4356]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+$ uv run --with playwright python scripts/demo_ui_check.py <shots> /opt/pw-browsers/chromium --assets <scratch>   # headless Chromium; README images left untouched
+approval card: Tool: mini_e_commerce__add_item_to_cart write 审批策略 approval policy: default no rule matched: write calls need a human by default {   "product_offer_id": 11,   "quantity": 1 } 将要改动的行 rows this call will change previewed shadow environment run: 4.8 s; the session's own database was not touched cart_it
+final answer: I added 'Wireless Noise Cancelling Headphones A' ($189) to your cart (quantity 1).
+diff: table	rows	added pk	removed pk	changed pk | cart_items	1 → 2	[2]	[]	[]
+timeline items: 31
+preview checks: ['preview match']
+demo_ui_check rc=0
+screenshots (not committed): demo-approval.png demo-diff.png demo-overview.png demo_1_approval.png demo_2_done_diff.png 
+$ NO_PROXY=* python3 scripts/docker_smoke.py --api-only http://127.0.0.1:8080   # a fresh session: the demo policy, query -> write -> preview + approval -> done
+approval policy (GET /healthz): configs/approval_policy.demo.yaml: no-payment-method-deletion (deny), bulk-cart-add-needs-human (require_human), small-cart-add-official (auto_approve)
+session start (POST /sessions, mini_e_commerce): 3.1 s, 7 tools
+query: mini_e_commerce__search_products -> ok
+write paused for approval: mini_e_commerce__add_item_to_cart (risk write)
+approval policy (ADR-030): no rule matched: write calls need a human by default
+preview (shadow env in the env-manager): cart_items +1, 4235.7 ms
+approved by ci-docker-smoke: mini_e_commerce__add_item_to_cart -> ok
+preview check of the approved write: match
+done: "I added 'Wireless Noise Cancelling Headphones A' ($189) to your cart (quantity 1)."
+db diff: cart_items added [2]
+result: PASS
+docker_smoke --api-only rc=0
+$ kill -TERM -- -<pgid of make demo-mock>
+server log (tail):
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [4356]
+make: *** [Makefile:42: demo-mock] Error 143
+(Error 143 = the SIGTERM sent to stop the server.) Afterwards: 0 processes left in the process group; GET /healthz -> HTTP 000 (000 = nothing listens on 8080)
+
+## 2. grep for evaluation calls
+$ grep -rnE "awm bench|--mode (bfcl|tau2|mcp_universe)" src scripts Makefile
+grep rc=1 (1 = no matches)
+
+## 3. registry sources and RESULTS.md
+registry entries: 30
+entries without source: []
+entries with verified != true: []
+RESULTS.md '待核对' occurrences: 0
+rc=0
+
+## 4. submodules pinned at the RECON SHAs, clean trees
+## RECON rows that record the pinned SHAs
+20:| AWM | https://github.com/Snowflake-Labs/agent-world-model | `85e322f69279e3b3325b7377ec3bab788514e9cb` | 2026-05-28 | submodule `third_party/agent-world-mo
+21:| AgentFly | https://github.com/Agent-One-Lab/AgentFly | `1256586b1109ba8e0dc0f179f8515b4567d09df4` | 2026-05-06 | submodule `third_party/AgentFly`（shallow
+257:| AgentFly | `main`@1256586 以及 `Simuphy, agents, algorithm, bilal/last_turn_mask_only, chatbricks, context, release, resource, shu-agentfly` 共 10 个�
+260:| AWM | 全仓（4 个提交）以及嵌套的 `mcp-adapted-bench`@2dff8bd（只读） | 通读，grep `grpo/verl/ppo/kl_coef` 等 | AWM 本体没有训练�
+298:| AWM | `>=3.12` | `fastapi==0.115.12`、`fastapi-mcp==0.4.0`、`mcp-agent==0.2.6`、`sqlalchemy==2.0.41`、`numpy>=2.4.2`、`openai>=2.17.0`；lock：`mcp 
+302:| AgentFly | `>=3.12,<3.13` | `vllm==0.19.0`（pyproject）；`vllm==0.10.0`（requirements.txt）；`[verl]` 含 `flash-attn`、`peft`、`ray[default]` | `
+## git submodule status
+ 1256586b1109ba8e0dc0f179f8515b4567d09df4 third_party/AgentFly (heads/main)
+ 85e322f69279e3b3325b7377ec3bab788514e9cb third_party/agent-world-model (heads/main)
+## git -C third_party/agent-world-model status --porcelain | wc -l (expect 0)
+0
+## git -C third_party/AgentFly status --porcelain | wc -l (expect 0)
+0
+
+## 5. secret scan (the CI step, over all tracked files)
+$ uv run detect-secrets-hook --baseline .secrets.baseline $(git ls-files | grep -v -E '^(third_party/|uv\.lock$|train/uv\.lock$)')
+files scanned: 236
+detect-secrets rc=0
+
+## 6. git log: continuous small commits
+$ git log --oneline origin/main..HEAD | wc -l
+22
+subjects that are not Conventional Commits (feat|fix|docs|test|chore|refactor, optional scope):
+(end of list)
+$ git log --oneline origin/main..HEAD
+76541a8 docs: conservative default approval policy and the demo policy (ADR-030, D34, D36)
+c976171 feat(config): default approval policy auto-approves nothing; demo policy for demo and smoke
+871728a docs: record the owner's Phase 18 confirmation (D34-D37)
+b201bc5 docs: describe the approval policy in the walkthrough, architecture and limitations
+7632928 docs(decisions): ADR-030 configurable approval policy
+8bfd2e8 feat(cli): workbench gateway policy test shows the rule a call would hit
+4d00084 feat(ui): show the deciding approval rule on the card, the timeline and the chat
+1d9b6cb feat(agent): route each call by the approval policy's answer
+2357110 feat(gateway): enforce the approval policy on every call and audit the deciding rule
+083eed5 feat(gateway): an ordered, schema-checked approval policy with a hard destructive guard
+0666427 docs(process): record the Phase 17 confirmation and decisions D31-D33
+b5bfe04 docs: describe approval previews in the architecture, walkthrough and limitations
+9edd9b5 docs(decisions): ADR-029 approval previews in a shadow environment
+d053595 test: assert the approval preview in docker-smoke and on official data
+bd2571a chore(config): set the approval preview timeout from measured timings
+128826a feat(ui): show the preview on the approval card and flag preview mismatches
+b47e499 feat(agent): preview write and destructive calls before asking for approval
+01a9110 feat(gateway): bind approval tokens to previews and check the real changes
+eb2f214 feat(envs): run approval previews in a shadow environment of the env-manager
+482a129 feat(envs): row-level changes and a structural comparison for approval previews
+d06f3f1 docs(process): save the polish-v3 task text as TASK_v3 and record decisions D26-D30
+2ed047f chore(ci): run docker-smoke on pushes to main and on pull requests into main
+
+## 7. LIMITATIONS lists every unverified item
+## U rows in LIMITATIONS §1.1
+18:| U1 | 用 vLLM 服务 Arctic-AWM | `configs/serving/arct
+19:| U3 | train 环境安装 | `train/pyproject.toml`、`tra
+20:| U4 | veRL 嵌套子模块与 Hydra 组合 | `check_over
+21:| U5 | smoke 训练运行 | `configs/train/smoke.yaml`、
+22:| U8 | `awm agent` / `awm verify` 各跑一次单任务 |
+23:| U9 | 合成流水线的 `gen scenario` 步骤 | `workbe
+## $ grep -rln --exclude-dir=__pycache__ UNVERIFIED-LOCAL src scripts configs docker-compose.yml Dockerfile train/pyproject.toml Makefile
+src/workbench/cli.py
+src/workbench/doctor.py
+src/workbench/train/launch.py
+src/workbench/train/preflight.py
+scripts/serve_vllm.sh
+configs/train/smoke.yaml
+configs/serving/arctic-awm-4b.yaml
+docker-compose.yml
+train/pyproject.toml
+## mapping: serve_vllm.sh, configs/serving, docker-compose.yml (gpu profile), cli.py serve -> U1; train/pyproject.toml -> U3; train/preflight.py (verl, hydra) -> U4; train/launch.py, configs/train/smoke.yaml, cli.py train -> U5; doctor.py gpu check -> GPU in general (U1/U5). U8 and U9 have no code marker and are listed in §1.1.
