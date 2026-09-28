@@ -5,7 +5,7 @@
 - §1 是验证状态，分两节：1.1 为仍未验证的项目（UNVERIFIED-LOCAL），写明原因与验证所需的资源和步骤；1.2 为已在真实环境中验证过的项目，附日期、机器类型与日志路径。
 - §2–§6 是已知限制，与是否验证无关。
 
-开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9）。本文件的状态截至 2026-09-25：TASK_v2（Phase 9–15）收尾，以及 polish-v3 的 Phase 16–18（审批前预演与审批策略的限制见 §6）。
+开发环境最初拦截了 `huggingface.co` 与 `arxiv.org`，2026-09-24 起放开（TASK_v2 Phase 9）。本文件的状态截至 2026-09-28：TASK_v2（Phase 9–15）收尾，以及 polish-v3 的 Phase 16–18 与 Phase 18 确认时的调整（审批前预演与审批策略的限制见 §6）。
 
 ## 1. 验证状态
 
@@ -169,6 +169,8 @@ Phase 0 结论为 **(b)**：上游只公开了环境适配（OpenEnv 的 `agent_
     - 字符串形式的数字不转换。
     - 规则里的参数名写错时不会报错，只是永远不命中；上线前可以用 `workbench gateway policy test` 试。
   - auto_approve 的 write 调用执行前没有预演，只在执行后测量实际改动并写入审计（D32）。外部 MCP 客户端经网关调用时同样如此。
+    - 所以默认策略 `configs/approval_policy.yaml` 不含 auto_approve 规则（D34）：上面"上游生成代码的语义缺陷"一条中，加购不存在的 offer 也会写入成功；一旦自动放行，这类写入就没有人把关。
+    - 自动批准的示例只在注释与演示策略 `configs/approval_policy.demo.yaml` 中；管理员开启前要自己权衡这一点。
   - 策略文件只在网关启动时加载，修改后要重启。
   - `tool_policy.yaml` 的 `require_approval` 不再能免除 write 与 destructive 的审批（Phase 18 之前可以）；要免除，只能写 auto_approve 规则。
   - `workbench gateway policy test` 离线分级只看工具名与路由的 HTTP 方法，在线会话还看工具描述，结果可能不同；可以用 `--risk` 指定。
